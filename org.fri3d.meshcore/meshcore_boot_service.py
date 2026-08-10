@@ -18,6 +18,13 @@ class MeshCoreBootService(Service):
 
     def onStart(self, intent):
         m = MeshCoreManager.get_instance()
+        # Run the one-time "coprocessor too old" migration here as well as in the app: a
+        # badge that reboots before MeshCore is next opened would otherwise start the radio
+        # -- and its CH32 reset path -- on firmware that can black-screen it, with no UI in
+        # a service to warn anyone. Whichever runs first does the flip; the other sees the
+        # pref already set and does nothing.
+        if m.apply_compat_autodisable():
+            print("MeshCoreBootService: radio service disabled -- badge firmware too old")
         if m.is_service_enabled():
             print("MeshCoreBootService: service enabled, starting background MeshCore receiver")
             m.start()

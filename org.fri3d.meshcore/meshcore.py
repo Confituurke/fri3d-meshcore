@@ -23,6 +23,9 @@ from mpos import (Activity, Intent, MposKeyboard, InputActivity, DisplayMetrics,
                   add_focus_border)
 
 from meshcore_manager import MeshCoreManager
+# Imported at module load, like meshcore_manager's siblings: a lazy import inside a function
+# runs after the app dir has left sys.path and fails on MicroPython.
+import meshcore_version
 
 # Buttons default to the theme's accent colour, and the focus ring is that same colour --
 # so the selection is invisible on them. Give buttons a dark neutral fill (distinct from the
@@ -172,6 +175,10 @@ class MeshCoreHome(Activity):
         self._keygen_busy = False       # guard: one keygen thread at a time
         self._advert_busy = False       # guard: one advertise thread at a time
         self._sub = None
+        # Once per app launch, not once per resume: MicroPythonOS builds a fresh
+        # MeshCoreHome per launch, while returning from a chat activity resumes this same
+        # instance -- so an instance attribute nags on launch and not on every tab round-trip.
+        self._compat_nagged = False
 
     def onCreate(self):
         screen = lv.obj()
@@ -329,6 +336,113 @@ class MeshCoreHome(Activity):
             nb = mbox.add_footer_button(no)
             nb.add_event_cb(lambda e: (self._close_mbox(mbox), _restore()),
                             lv.EVENT.CLICKED, None)
+
+    # --- unsupported-firmware notice ---------------------------------------- #
+    def _nag_if_unsupported(self):
+        """Warn, once per app launch, when the badge coprocessor firmware is too old.
+
+        On CH32 firmware below 2.0.2 the LoRa reset this app performs to recover a wedged
+        radio can crash the coprocessor outright -- black screen, and only a power-cycle
+        gets the badge back (MicroPythonOS#224).  The app still runs: the reset path is
+        spaced and rate-limited to make that unlikely, but the defect is in firmware and we
+        cannot fix it from here, so the user gets told rather than silently gambled with.
+
+        Also runs the one-time migration that turns the background radio service off, and
+        says so in the dialog when it fired -- otherwise the setting would silently change
+        under someone who had it on before the update.
+
+        Deliberately not dismissable-for-good: an unsupported badge is unsupported on every
+        launch, and a "don't show again" would hide the one explanation for a black screen.
+        The acknowledgement is a checkbox plus OK so it cannot be dismissed by reflex.
+        """
+        if self._compat_nagged:
+            return
+        self._compat_nagged = True    # set first: a failure here must not retry every resume
+        try:
+            version, supported = MeshCoreManager.coprocessor_status()
+        except Exception as e:
+            print("MeshCoreHome: coprocessor check failed:", repr(e))
+            return
+        if supported:
+            return
+
+        # Before the dialog, and before onResume gets to start(): flip the service off if
+        # this is the first launch on unsupported firmware.
+        try:
+            turned_off = self.manager.apply_compat_autodisable() or self.manager.was_compat_autodisabled()
+        except Exception as e:
+            print("MeshCoreHome: compat autodisable failed:", repr(e))
+            turned_off = False
+        if turned_off:
+            # The Me tab was built in onCreate, before the flip, so its button still says ON.
+            self._sync_service_button()
+
+        fmt = meshcore_version.format_version
+        print("MeshCoreHome: unsupported coprocessor firmware %s (need %s)"
+              % (fmt(version), fmt(meshcore_version.MIN_CH32_FW)))
+
+        grp = None
+        prev = None
+        try:
+            grp = lv.group_get_default()
+            prev = grp.get_focused()
+        except Exception:
+            pass
+
+        def _restore_focus():
+            try:
+                if grp is not None and prev is not None:
+                    grp.focus_obj(prev)
+            except Exception:
+                pass
+
+        text = (
+            "This badge runs coprocessor firmware %s.\n"
+            "MeshCore needs %s or newer.\n\n"
+            "On older firmware, resetting the LoRa radio can crash the coprocessor: the "
+            "screen goes black and only switching the badge off and on again recovers it.\n\n"
+            "Update MicroPythonOS to %s or newer with the OSUpdate app -- it installs the "
+            "new coprocessor firmware for you at the next boot."
+            % (fmt(version), fmt(meshcore_version.MIN_CH32_FW),
+               fmt(meshcore_version.MIN_MPOS_RELEASE)))
+        if turned_off:
+            text += ("\n\nThe background radio service has been turned OFF. You can turn it "
+                     "back on in the Me tab, but the risk above applies until you update.")
+
+        mbox = lv.msgbox()
+        mbox.set_width(DisplayMetrics.pct_of_width(90))
+        mbox.add_title("Unsupported badge firmware")
+        mbox.add_text(text)
+
+        try:
+            content = mbox.get_content()
+        except Exception:
+            content = mbox            # older binding without get_content(): parent to the box
+        ack = lv.checkbox(content)
+        ack.set_text("I understand this badge is not supported")
+        ack.set_style_pad_top(8, 0)
+        add_focus_border(ack)
+
+        # No Cancel button: ticking the box and pressing OK is the only way out.
+        ok = mbox.add_footer_button("OK")
+        ok.add_state(lv.STATE.DISABLED)
+
+        def _on_ack(e):
+            if ack.has_state(lv.STATE.CHECKED):
+                ok.remove_state(lv.STATE.DISABLED)
+            else:
+                ok.add_state(lv.STATE.DISABLED)
+
+        ack.add_event_cb(_on_ack, lv.EVENT.VALUE_CHANGED, None)
+        ok.add_event_cb(lambda e: (self._close_mbox(mbox), _restore_focus()),
+                        lv.EVENT.CLICKED, None)
+
+        # Land the focus ring on the checkbox, so arrow-key users reach it first.
+        try:
+            if grp is not None:
+                grp.focus_obj(ack)
+        except Exception:
+            pass
 
     # --- Channels tab ------------------------------------------------------- #
     def _build_channels_tab(self, tab):
@@ -499,6 +613,11 @@ class MeshCoreHome(Activity):
         self.diag_label.set_width(lv.pct(100))
         self.diag_label.set_style_text_font(lv.font_montserrat_14, lv.PART.MAIN)
 
+        # Coprocessor firmware, read once here rather than from the 2s diagnostics timer:
+        # it cannot change while the badge is on, and reading it is an I2C transaction --
+        # the same bus whose traffic patterns this whole release is about.
+        self._build_firmware_line(tab)
+
         self.name_label = lv.label(tab)
         self.name_label.set_text("Name: " + MeshCoreManager.get_instance().nickname())
         self.name_label.set_long_mode(lv.label.LONG_MODE.WRAP)
@@ -652,6 +771,27 @@ class MeshCoreHome(Activity):
         if name and MeshCoreManager.get_instance().set_nickname(name):
             lv.async_call(lambda _: self.name_label.set_text("Name: " + name), None)
 
+    @staticmethod
+    def _build_firmware_line(tab):
+        """Show the coprocessor firmware version, flagged when it is below the minimum."""
+        try:
+            version, supported = MeshCoreManager.coprocessor_status()
+        except Exception:
+            return
+        if version is None:
+            return          # not a fri3d_2026 badge (or unreadable) -- nothing useful to say
+        fmt = meshcore_version.format_version
+        lbl = lv.label(tab)
+        lbl.set_long_mode(lv.label.LONG_MODE.WRAP)
+        lbl.set_width(lv.pct(100))
+        lbl.set_style_text_font(lv.font_montserrat_12, lv.PART.MAIN)
+        if supported:
+            lbl.set_text("Badge firmware: %s" % fmt(version))
+        else:
+            lbl.set_text("Badge firmware: %s  -- UNSUPPORTED, needs %s. Update MicroPythonOS."
+                         % (fmt(version), fmt(meshcore_version.MIN_CH32_FW)))
+            lbl.set_style_text_color(lv.color_hex(_BADGE_BG), lv.PART.MAIN)
+
     def _restart_radio(self):
         print("MeshCoreHome: restart radio requested")
         MeshCoreManager.get_instance().restart()
@@ -686,7 +826,12 @@ class MeshCoreHome(Activity):
         lines.append("Received %d pkts%s" % (s["rx_count"], seen))
         lines.append("Sent %d" % s["tx_count"] + ("  (%d queued)" % s["tx_pending"] if s["tx_pending"] else ""))
         if s["reinits"]:
-            lines.append("Auto-recoveries: %d" % s["reinits"])
+            # Radio resets are the number fri3d-meshcore#7 wants compared across OS versions,
+            # so show the CH32 reset count next to the re-init count rather than only logging it.
+            line = "Auto-recoveries: %d  (resets %d" % (s["reinits"], s["ch32_resets"])
+            if s["ch32_reset_fails"]:
+                line += ", %d unconfirmed" % s["ch32_reset_fails"]
+            lines.append(line + ")")
         lines.append("Companions %d  Contacts %d" % (s["nodes"], s["contacts"]))
         return "\n".join(lines)
 
@@ -702,6 +847,8 @@ class MeshCoreHome(Activity):
     def onResume(self, screen):
         super().onResume(screen)
         self.manager = MeshCoreManager.get_instance()
+        # Before anything touches the radio: if the coprocessor firmware is too old, say so.
+        self._nag_if_unsupported()
         # only run the radio when the service is enabled (the Me-tab toggle is the control)
         if self.manager.is_service_enabled() and not self.manager.is_running():
             print("MeshCoreHome: service enabled, starting manager")

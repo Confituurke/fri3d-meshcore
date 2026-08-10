@@ -13,6 +13,39 @@ published on [BadgeHub](https://badgehub.eu) as the **`org.fri3d.meshcore`** pro
 
 Wire-compatible with real MeshCore nodes. Protocol logic is pure-Python and unit-tested off-badge.
 
+## Requirements
+
+**MicroPythonOS 0.16.2 or newer**, which means **badge coprocessor (CH32) firmware 2.0.2 or newer**.
+
+The SX1262's reset line is wired only to the CH32 coprocessor, not to the ESP32-S3, so the only
+way to hardware-reset a wedged radio is to write the CH32's config register twice — assert reset,
+then release it. Two consecutive I2C register writes is exactly the pattern that crashes CH32
+firmware 2.0.1: the badge black-screens, all further I2C returns `ENODEV`, and only a power-cycle
+recovers it ([MicroPythonOS#224](https://github.com/MicroPythonOS/MicroPythonOS/issues/224)). Since
+this app resets the radio on its recovery path, a badge that keeps losing the radio could
+black-screen itself. Fixed in badge firmware
+[v2.0.2](https://github.com/Fri3dCamp/badge_2026_fw/releases/tag/v2.0.2); MicroPythonOS 0.16.2
+installs it automatically at boot.
+
+MeshCore checks `mpos.io_expander.version` at launch and shows a notice you have to acknowledge if
+the coprocessor is older — there is no manifest field for a minimum firmware version yet
+([MicroPythonOS#223](https://github.com/MicroPythonOS/MicroPythonOS/issues/223)), so the check has
+to happen at runtime. The app still runs on older firmware: the reset path is widely spaced,
+pauses LVGL's I2C traffic, and backs off exponentially when recovery keeps failing, which makes a
+crash unlikely — but the defect is in firmware and cannot be fixed from the app.
+
+**Upgrading with the radio service already on:** app updates keep your settings (only uninstalling
+clears them), so the first time this version runs on a badge with old coprocessor firmware it turns
+the background radio service **off** once, and says so. That happens at boot as well as on launch,
+since the boot service starts the radio headless with no UI to warn through. It is a one-time
+migration: turn the service back on from the Me tab and it stays on, on the assumption you have
+read the warning. Updating the OS is the real fix.
+
+Your coprocessor version is shown on the **Me** tab, and from the REPL:
+```python
+import mpos; print(mpos.io_expander.version)   # want (2, 0, 2) or newer
+```
+
 ## Layout
 
 ```
@@ -26,6 +59,7 @@ org.fri3d.meshcore/          # the app payload — exactly what ships in the .mp
   meshcore_crypto.py        # Ed25519 / X25519 (pure-Python)
   meshcore_advert.py        # advert parse/build + share URIs
   meshcore_dm.py            # direct-message + ack codec
+  meshcore_version.py       # minimum badge firmware + version comparison
   meshcore_boot_service.py  # boot_completed service (starts the radio if enabled)
   fonts/                    # Archivo Narrow (OFL), the chat font — see below
 tests/                      # off-badge unit tests (desktop CPython)
