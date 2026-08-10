@@ -58,7 +58,7 @@ jobs:
 
       - name: Build the .mpk
         id: package
-        uses: tjorim/mpos-package-mpk@v1.0.2
+        uses: tjorim/mpos-package-mpk@v1.0.3
         with:
           app-dir: org.fri3d.meshcore
 
@@ -73,7 +73,7 @@ jobs:
       # Pinned, NOT @v1: the moving v1 tag predates the mpk-path input, so it silently drops
       # the .mpk (just a warning) and publishes an app the AppStore cannot download.
       - name: Publish to BadgeHub
-        uses: tjorim/mpos-badgehub-publish@v1.0.11
+        uses: tjorim/mpos-badgehub-publish@v1.0.13
         with:
           slug: org.fri3d.meshcore        # must equal the MANIFEST fullname: the AppStore
           app-dir: org.fri3d.meshcore     # installs into apps/<slug> and rejects a .mpk whose
