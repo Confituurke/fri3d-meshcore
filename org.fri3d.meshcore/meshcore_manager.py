@@ -36,6 +36,7 @@ from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_m
 # access on the already-imported module cannot.
 import meshcore_crypto   # noqa: F401
 import meshcore_dm       # noqa: F401
+import meshcore_radio    # noqa: F401
 import meshcore_version  # noqa: F401
 
 MESHCORE_RADIO = dict(
@@ -735,6 +736,15 @@ class MeshCoreManager:
         # 'blocking'". TX/RX guard on this flag so they never touch a half-configured radio.
         self._radio_ready = False
         state = None
+        # Claim the shared SX1262 before touching it. On an OS that arbitrates the radio
+        # (MicroPythonOS#229) this is what stops us and lora_chat from driving the same chip
+        # at once; on 0.17.x nothing arbitrates and it always succeeds. Bail out *before*
+        # the CH32 reset -- resetting a radio another app is mid-transaction on is exactly
+        # the collision the lock exists to prevent.
+        if not meshcore_radio.lock_acquire("meshcore"):
+            print("MeshCoreManager: LoRa held by %s, not starting radio"
+                  % (meshcore_radio.lock_holder(),))
+            return False
         # One CH32 reset per bring-up, not one per attempt. Every reset is two consecutive
         # writes to the coprocessor's config register, which is the pattern that can crash
         # it (see _reset_lora_via_ch32) -- so a failed begin() gets a second begin(), not a
@@ -745,7 +755,10 @@ class MeshCoreManager:
             if fri3d:
                 self._rf_sw = Pin(46, Pin.OUT)
                 self._rf_sw.value(1); print("RF_SW set to HIGH")
-            self._radio = LoRaManager.radioChip
+            # adapt(): the board decides which driver class radioChip is, and the upstream
+            # one (MicroPythonOS#229) renames every method. Returns it untouched on the
+            # driver 0.17.x ships, so this costs nothing today.
+            self._radio = meshcore_radio.adapt(LoRaManager.radioChip)
             state = self._radio.begin(**MESHCORE_RADIO)
             print("MeshCoreManager: begin state=%s (attempt %d)" % (state, attempt))
             if state == 0:
@@ -772,14 +785,22 @@ class MeshCoreManager:
     def _radio_init_thread(self):
         import time
         time.sleep(1)
+        ok = False
         try:
-            if not self._bring_up_radio():
+            ok = self._bring_up_radio()
+            if not ok:
                 self._running = False
         except Exception as e:
             print("MeshCoreManager: radio init failed:", repr(e))
             self._running = False
         finally:
             self._bringup_in_progress = False
+            # A bring-up that failed clears _running directly, so stop() early-returns and
+            # would never hand the radio back -- give it up here instead, or a badge that
+            # cannot start its radio would hold the claim against every other LoRa app.
+            # Harmless when we never got the claim: release() ignores a non-holder.
+            if not ok:
+                meshcore_radio.lock_release("meshcore")
         # warm per-contact shared secrets off the UI/RX path (avoids the first-DM freeze/stall)
         self._spawn_secret_precompute()
 
@@ -812,6 +833,11 @@ class MeshCoreManager:
                 print("MeshCoreManager: stop/sleep error:", repr(e))
             finally:
                 self._radio_lock.release()
+            # Hand the chip back to the framework only after our own worker has let go of
+            # it: this is the cross-app claim from _bring_up_radio, not the intra-app
+            # _radio_lock above, and releasing it early would let another app start driving
+            # the radio while we were still sleeping it.
+            meshcore_radio.lock_release("meshcore")
         self._flush_dirty_history()   # persist any coalesced DM history before going idle
         print("MeshCoreManager: stopped")
 
@@ -866,12 +892,12 @@ class MeshCoreManager:
                 return False
         except Exception:
             pass  # pin read unavailable -> fall through to the SPI status check
-        from drivers.lora.sx1262 import SX1262
+        rc = meshcore_radio.consts(self._radio)
         got = False
         self._radio_lock.acquire()
         try:
             events = self._radio.getIrqStatus()
-            if events & SX1262.RX_DONE:
+            if events & rc.RX_DONE:
                 rssi = self._radio.getRSSI()
                 snr = self._radio.getSNR()
                 msg, err = self._radio.recv()   # re-arms RX + clears IRQ (via _readData)
@@ -880,7 +906,8 @@ class MeshCoreManager:
                     self._last_rx_ms = self._now_ms()
                     got = True
                 else:
-                    print("MeshCoreManager: recv err=%s" % SX1262.STATUS[err])
+                    print("MeshCoreManager: recv err=%s"
+                          % meshcore_radio.status_name(self._radio, err))
             else:
                 # DIO1 high but no RX_DONE (unexpected): clear and re-arm so we don't spin.
                 self._radio.clearIrqStatus()
@@ -1879,7 +1906,6 @@ class MeshCoreManager:
             # transmitting before bring-up completes fails with "no attribute 'blocking'".
             print("MeshCoreManager: cannot TX, radio not ready")
             return False
-        from drivers.lora.sx1262 import SX1262
         import time
         ok = False
         self._radio_lock.acquire()
@@ -1889,7 +1915,8 @@ class MeshCoreManager:
             if self._rf_sw is not None:
                 self._rf_sw.value(0)
             _, result = self._radio.send(raw)   # non-blocking: returns immediately
-            print("MeshCoreManager: TX result %s" % SX1262.STATUS[result])
+            print("MeshCoreManager: TX result %s"
+                  % meshcore_radio.status_name(self._radio, result))
             # Wait out the airtime with NO SPI whatsoever. send() is non-blocking, so we must
             # wait before re-arming RX -- but polling getIrqStatus() during TX collides with
             # the LCD's DMA on the shared SPI bus 2 and WEDGES the radio (GetStatus -> 0x00).
