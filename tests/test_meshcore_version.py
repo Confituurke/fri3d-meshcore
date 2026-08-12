@@ -15,9 +15,11 @@ def _assert(c, m=""):
 
 
 def test_minimums_are_the_documented_ones():
-    # The CH32 release that fixed "2 consecutive i2c register writes" (badge_2026_fw v2.0.2),
-    # and the MicroPythonOS release that auto-flashes it.
+    # The CH32 release that fixed "2 consecutive i2c register writes" (badge_2026_fw v2.0.2).
     _assert(MIN_CH32_FW == (2, 0, 2), MIN_CH32_FW)
+    # A semantic floor, deliberately not a downloadable release: 0.16.1 carried coprocessor
+    # 2.0.1 and 0.17.0 carried 2.0.3, so the first OS that could carry a fixed one sits
+    # between them. What matters is which real releases clear it -- see the at_least tests.
     _assert(MIN_MPOS_RELEASE == (0, 16, 2), MIN_MPOS_RELEASE)
 
 

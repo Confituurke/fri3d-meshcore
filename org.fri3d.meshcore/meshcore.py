@@ -378,8 +378,11 @@ class MeshCoreHome(Activity):
             self._sync_service_button()
 
         fmt = meshcore_version.format_version
-        print("MeshCoreHome: unsupported coprocessor firmware %s (need %s)"
-              % (fmt(version), fmt(meshcore_version.MIN_CH32_FW)))
+        # The OS floor goes in the log, not the dialog: it is the useful number in a serial
+        # capture, and the useless one on screen (no such release is downloadable).
+        print("MeshCoreHome: unsupported coprocessor firmware %s (need %s, OS floor %s)"
+              % (fmt(version), fmt(meshcore_version.MIN_CH32_FW),
+                 fmt(meshcore_version.MIN_MPOS_RELEASE)))
 
         grp = None
         prev = None
@@ -401,10 +404,10 @@ class MeshCoreHome(Activity):
             "MeshCore needs %s or newer.\n\n"
             "On older firmware, resetting the LoRa radio can crash the coprocessor: the "
             "screen goes black and only switching the badge off and on again recovers it.\n\n"
-            "Update MicroPythonOS to %s or newer with the OSUpdate app -- it installs the "
-            "new coprocessor firmware for you at the next boot."
-            % (fmt(version), fmt(meshcore_version.MIN_CH32_FW),
-               fmt(meshcore_version.MIN_MPOS_RELEASE)))
+            "Update your badge to the latest MicroPythonOS -- it installs the new "
+            "coprocessor firmware for you at the next boot. If OSUpdate says the badge is "
+            "already up to date, see the MeshCore README."
+            % (fmt(version), fmt(meshcore_version.MIN_CH32_FW)))
         if turned_off:
             text += ("\n\nThe background radio service has been turned OFF. You can turn it "
                      "back on in the Me tab, but the risk above applies until you update.")

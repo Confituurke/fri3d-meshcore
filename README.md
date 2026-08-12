@@ -15,7 +15,8 @@ Wire-compatible with real MeshCore nodes. Protocol logic is pure-Python and unit
 
 ## Requirements
 
-**MicroPythonOS 0.16.2 or newer**, which means **badge coprocessor (CH32) firmware 2.0.2 or newer**.
+**Badge coprocessor (CH32) firmware 2.0.2 or newer**, which in practice means
+**MicroPythonOS 0.17.0 or newer** — the first release that ships a fixed coprocessor (2.0.3).
 
 The SX1262's reset line is wired only to the CH32 coprocessor, not to the ESP32-S3, so the only
 way to hardware-reset a wedged radio is to write the CH32's config register twice — assert reset,
@@ -24,8 +25,17 @@ firmware 2.0.1: the badge black-screens, all further I2C returns `ENODEV`, and o
 recovers it ([MicroPythonOS#224](https://github.com/MicroPythonOS/MicroPythonOS/issues/224)). Since
 this app resets the radio on its recovery path, a badge that keeps losing the radio could
 black-screen itself. Fixed in badge firmware
-[v2.0.2](https://github.com/Fri3dCamp/badge_2026_fw/releases/tag/v2.0.2); MicroPythonOS 0.16.2
-installs it automatically at boot.
+[v2.0.2](https://github.com/Fri3dCamp/badge_2026_fw/releases/tag/v2.0.2). MicroPythonOS installs
+whichever coprocessor firmware it carries automatically at boot: 0.16.1 carries the broken 2.0.1,
+and 0.17.0 is the first release carrying a fixed one (2.0.3).
+
+**If OSUpdate says your badge is up to date on 0.16.1**, it is checking a stale mirror rather than
+telling you the truth. OSUpdate on 0.16.1 only ever queries `updates.micropythonos.com`, whose
+manifest still advertises 0.16.1; the alternate `updates.micropythonos.org` mirror is the one
+serving 0.17.0, and it is only consulted by 0.17.0 and later — which you cannot reach from 0.16.1.
+Until that is fixed upstream, update by flashing
+`https://updates.micropythonos.org/releases/esp32s3/MicroPythonOS_esp32s3_0.17.0.ota`, or install a
+[release build](https://github.com/MicroPythonOS/MicroPythonOS/releases) over USB.
 
 MeshCore checks `mpos.io_expander.version` at launch and shows a notice you have to acknowledge if
 the coprocessor is older — there is no manifest field for a minimum firmware version yet

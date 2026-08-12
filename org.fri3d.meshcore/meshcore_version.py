@@ -14,10 +14,11 @@ every subsequent I2C transaction returns ENODEV, and only a hard power-cycle rec
 See MicroPythonOS#224 and Fri3dCamp/badge_2026_fw release v2.0.2, which fixes it.
 
 MeshCore's watchdog resets the radio on its recovery path, so on v2.0.1 a badge that keeps
-losing the radio can black-screen itself.  MicroPythonOS 0.16.2 auto-flashes coprocessor
-2.0.2 at boot, so requiring the OS version and requiring the coprocessor version are two
-views of the same requirement -- the coprocessor version is the one that actually matters
-and the one we check, since a user can arrive at 2.0.2 by other routes.
+losing the radio can black-screen itself.  A MicroPythonOS release auto-flashes whichever
+coprocessor firmware it carries at boot, so requiring the OS version and requiring the
+coprocessor version are two views of the same requirement -- the coprocessor version is the
+one that actually matters and the one we check, since a user can arrive at 2.0.2 by other
+routes.
 
 There is no manifest field for any of this: mpos.app.App.from_manifest() parses only
 name/publisher/descriptions/icon_url/download_url/fullname/version/category/activities/
@@ -28,8 +29,17 @@ Until it lands, the check has to happen at runtime -- see MeshCoreManager.coproc
 # CH32 coprocessor firmware, read from mpos.io_expander.version (I2C register 0x00).
 MIN_CH32_FW = (2, 0, 2)
 
-# MicroPythonOS release, read from mpos.BuildInfo.version.release. Informational: it is the
-# release that auto-flashes MIN_CH32_FW, so it is what we tell the user to install.
+# MicroPythonOS release floor, read from mpos.BuildInfo.version.release. Informational --
+# the gate that actually runs is MIN_CH32_FW above.
+#
+# This is a *semantic* floor, not a release anyone can download: no 0.16.2 was ever
+# published.  0.16.1 shipped coprocessor 2.0.1, and the next release, 0.17.0, shipped 2.0.3
+# -- so "the first OS that could carry a fixed coprocessor" falls between the two.  Keeping
+# the floor here means every real release that clears it (0.17.0 and up) compares as
+# supported, without this constant having to chase each new version.
+#
+# Nothing user-facing prints this number.  Naming a version that cannot be downloaded sent
+# people to a dead end, so the notice says "update your badge" instead.
 MIN_MPOS_RELEASE = (0, 16, 2)
 
 
