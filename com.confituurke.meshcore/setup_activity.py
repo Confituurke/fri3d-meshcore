@@ -202,8 +202,9 @@ class SetupActivity(Activity):
         if self._advert:
             self.mgr.advertise(flood=True)
         import main_activity
-        self.startActivity(Intent(activity_class=main_activity.MeshCoreHome))
+        # finish() pops the top of the stack, so leave first and then open the main screen.
         self.finish()
+        self.startActivity(Intent(activity_class=main_activity.MeshCoreHome))
 
     def back(self):
         self._collect()

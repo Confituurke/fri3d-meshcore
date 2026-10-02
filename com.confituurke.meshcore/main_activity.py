@@ -29,8 +29,9 @@ class MeshCoreHome(Activity):
         self._tab = None
         self._tab_index = -1
         if not SharedPreferences(MESHCORE_APP).get_bool("setup_done", False):
+            # This activity is not on the stack yet (only setContentView puts it there), so
+            # it must not finish(): that would pop whatever is on top, i.e. the setup screen.
             self.startActivity(Intent(activity_class=setup_activity.SetupActivity))
-            self.finish()
             return
         if not self.mgr.is_running():
             self.mgr.start()           # listen while the app is open
@@ -73,6 +74,10 @@ class MeshCoreHome(Activity):
     def onResume(self, screen):
         super().onResume(screen)
         self.mgr.add_subscriber(self._on_event)
+        # Events while a thread was on top (e.g. its messages being read) were not seen here.
+        self.refresh_badge()
+        if self._tab is not None:
+            self._tab.on_event("unread", None)
 
     def onPause(self, screen):
         self.mgr.remove_subscriber(self._on_event)

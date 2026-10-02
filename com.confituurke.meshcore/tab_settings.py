@@ -88,8 +88,18 @@ class SettingsTab(Tab):
         ta.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
         ta.set_style_border_width(0, lv.PART.MAIN)
         ta.set_style_radius(10, lv.PART.MAIN)
-        ta.add_event_cb(lambda e: self._kb.set_textarea(ta), lv.EVENT.FOCUSED, None)
+        ta.add_event_cb(lambda e: self._attach_keyboard(ta), lv.EVENT.FOCUSED, None)
         return ta
+
+    def _attach_keyboard(self, ta):
+        # Focus moves between textareas while a screen is being torn down, after the
+        # keyboard may already be gone.
+        if self._kb is None:
+            return
+        try:
+            self._kb.set_textarea(ta)
+        except Exception:
+            self._kb = None
 
     def _fill_channels(self):
         self._channels.clean()
@@ -123,6 +133,12 @@ class SettingsTab(Tab):
 
     def remove_channel(self, name):
         self.mgr.remove_channel(name)
+
+    def destroy(self):
+        # The keyboard lives on the screen, not in the tab's container: delete it here.
+        if self._kb is not None:
+            self._kb.delete()
+            self._kb = None
 
     def on_event(self, event, data):
         if event == "channels":

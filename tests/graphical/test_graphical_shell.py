@@ -27,10 +27,37 @@ class TestShell(unittest.TestCase):
 
     def test_first_run_starts_setup(self):
         mc_fixtures.fresh_manager(setup_done=False)
+        mc_fixtures.push_base()
         AppManager.start_app(mc_fixtures.APP)
         wait_for_render(20)
-        act = mpos.ui.screen_stack[-1][0]
-        self.assertEqual(type(act).__name__, "SetupActivity")
+        self.assertEqual(mc_fixtures.stack_names(), ["BaseActivity", "SetupActivity"])
+
+    def test_badges_refresh_after_reading_a_thread(self):
+        import meshcore_manager as mm
+        m = mc_fixtures.fresh_manager()
+        m._add_message("Public", {"ts": mm.unix_time(), "sender": "Sam", "text": "hi",
+                                  "incoming": True})
+        m._bump_unread("Public")
+        act = mc_fixtures.open_app()
+        self.assertEqual(act._tab._rows["Public"].badge_label.get_text(), "1")
+        act._tab.open_chat("Public", "channel")
+        wait_for_render(20)
+        mpos.ui.screen_stack[-1][0].finish()
+        wait_for_render(20)
+        self.assertTrue(act._tab._rows["Public"].badge.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue(act.tabbar._badges[0].has_flag(lv.obj.FLAG.HIDDEN))
+
+    def test_settings_visits_do_not_leak_keyboards(self):
+        mc_fixtures.fresh_manager()
+        act = mc_fixtures.open_app()
+        scr = lv.screen_active()
+        before = scr.get_child_count()
+        for _ in range(3):
+            act.select(3)
+            wait_for_render(5)
+            act.select(0)
+            wait_for_render(5)
+        self.assertEqual(scr.get_child_count(), before)
 
 
 if __name__ == "__main__":

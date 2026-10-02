@@ -28,6 +28,7 @@ class TestSetup(unittest.TestCase):
 
     def test_setup_three_steps_and_finish(self):
         rec = mc_fixtures.Recorder(self.m, "advertise", result=(True, None))
+        mc_fixtures.push_base()
         act = _open_setup()
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Step 1 of 3"))
         act._name.set_text("Indy")
@@ -43,6 +44,9 @@ class TestSetup(unittest.TestCase):
         self.assertEqual(self.m.nickname(), "Indy")
         self.assertEqual(self.m.radio_preset()["id"], "eu-narrow")
         self.assertEqual(rec.calls[0][2], {"flood": True})
+        self.assertEqual(mc_fixtures.stack_names()[-1], "MeshCoreHome")
+        self.assertFalse("SetupActivity" in mc_fixtures.stack_names())
+        self.assertTrue(self.m.is_running())
 
     def test_setup_back_goes_to_previous_step(self):
         act = _open_setup()

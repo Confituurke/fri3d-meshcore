@@ -105,3 +105,24 @@ def seed_nodes(m):
                         "hops": hops, "route": "flood" if hops else "direct",
                         "heard_ms": now - age_s * 1000, "seq": 100 - age_s // 60,
                         "verified": True, "timestamp": 1, "lat": None, "lon": None}
+
+
+def push_base():
+    """Put a plain activity at the bottom of the stack, as the launcher is on the device:
+    an Activity.finish() that pops the wrong screen then shows up in the tests."""
+    import mpos.ui
+    from mpos import Activity, Intent, wait_for_render
+    from mpos.activity_navigator import ActivityNavigator
+    import lvgl as lv
+
+    class BaseActivity(Activity):
+        def onCreate(self):
+            self.setContentView(lv.obj())
+
+    ActivityNavigator.startActivity(Intent(activity_class=BaseActivity, app_fullname=APP))
+    wait_for_render(10)
+
+
+def stack_names():
+    import mpos.ui
+    return [type(e[0]).__name__ for e in mpos.ui.screen_stack]
