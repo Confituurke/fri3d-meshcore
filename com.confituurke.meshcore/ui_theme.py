@@ -136,6 +136,7 @@ def box(parent, w=None, h=None, flow=None, st="plain"):
     o.add_style(style(st), lv.PART.MAIN)
     o.set_size(w if w is not None else lv.pct(100), h if h is not None else lv.SIZE_CONTENT)
     o.remove_flag(lv.obj.FLAG.SCROLLABLE)
+    o.remove_flag(lv.obj.FLAG.CLICKABLE)    # taps go to the clickable() ancestor
     if flow is not None:
         o.set_flex_flow(flow)
     return o

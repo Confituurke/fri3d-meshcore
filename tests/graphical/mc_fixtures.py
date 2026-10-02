@@ -43,3 +43,33 @@ class Recorder:
 
     def names(self):
         return [c[0] for c in self.calls]
+
+
+ALEX = "a3" + "11" * 31
+
+
+def seed_chats(m):
+    """Public with two unread messages from Sam, and a contact Alex with one DM."""
+    import meshcore_manager as mm
+    now = mm.unix_time()
+    m._add_message("Public", {"ts": now - 300, "sender": "Sam", "text": "anyone near the Gent repeater?",
+                              "incoming": True, "snr": 6.5, "hops": 3})
+    m._add_message("Public", {"ts": now - 200, "sender": "Sam", "text": "road closed near Aalst",
+                              "incoming": True, "snr": 2.0, "hops": 4})
+    m._bump_unread("Public")
+    m._bump_unread("Public")
+    m.add_contact(ALEX, "Alex")
+    m._add_dm(ALEX, {"ts": now - 100, "sender": "Kim", "text": "see you at three",
+                     "incoming": False, "tx": True, "delivered": True, "ack": "00"})
+
+
+def open_app(tab=0):
+    import mpos.ui
+    from mpos import AppManager, wait_for_render
+    AppManager.start_app(APP)
+    wait_for_render(20)
+    act = mpos.ui.screen_stack[-1][0]
+    if tab:
+        act.select(tab)
+        wait_for_render(10)
+    return act

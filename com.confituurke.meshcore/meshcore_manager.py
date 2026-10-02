@@ -736,6 +736,10 @@ class MeshCoreManager:
         # begin(), and only a bring-up that still fails resets again, with _attempt_reinit's
         # backoff keeping those far apart.
         self._reset_radio()
+        if LoRaManager.radioChip is None:
+            print("MeshCoreManager: this device has no LoRa radio")
+            meshcore_radio.lock_release("meshcore")
+            return False
         for attempt in (1, 2):
             # adapt(): the board decides which driver class radioChip is, and the upstream
             # one (MicroPythonOS#229) renames every method. Returns it untouched on the

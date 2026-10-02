@@ -28,10 +28,6 @@ class Tab:
         """Called before the tab's widgets are deleted (stop timers here)."""
 
 
-class ChatsTab(Tab):
-    title = "Chats"
-
-
 class NodesTab(Tab):
     title = "Nodes"
 
