@@ -55,6 +55,9 @@ class _DummyLock:
 MAX_PACKETS = 100       # raw log cap
 MAX_MESSAGES = 200      # per-channel / per-contact history cap (RAM)
 CH_HISTORY_CAP = 50     # channel messages kept on flash, per channel
+NOISE_EVERY_MS = 10000  # noise-floor sample interval (Radio tab)
+NOISE_SAMPLES = 180     # 30 min of samples
+STATS_WINDOW_MS = 3600 * 1000
 FLUSH_EVERY_MS = 5000   # coalesce history/unread writes while the worker runs
 # Files next to config.json (each SharedPreferences() re-reads its whole file, so bulky
 # history stays out of the small settings file).
@@ -151,6 +154,13 @@ class MeshCoreManager:
         self._last_flush_ms = None
         self._unread = {}                        # channel name / contact pubkey_hex -> unread count
         self._mentions = set()                   # keys whose unread messages mention us
+        # --- radio statistics (Radio tab) ---
+        self._noise = []                         # noise-floor samples (dBm), oldest first
+        self._last_noise_ms = None
+        self._rx_log = []                        # (ticks_ms, rssi) of received packets, last hour
+        self._tx_log = []                        # (ticks_ms, airtime_ms) of transmits, last hour
+        self._stats_start_ms = self._now_ms()
+        self._preset = None                      # cached radio_preset()
         # --- status/diagnostics (stashed by the worker so the UI never does raw radio SPI) ---
         self._last_status_byte = None            # last SX1262 GetStatus byte (worker-read)
         self._last_rx_ms = None                  # ticks_ms of the last received packet
@@ -216,16 +226,72 @@ class MeshCoreManager:
             "contacts": len(self._contacts),
         }
 
+    # --- radio statistics --------------------------------------------------- #
+    def _log_stat(self, log, entry):
+        log.append(entry)
+        cutoff = entry[0] - STATS_WINDOW_MS
+        while log and log[0][0] - cutoff < 0:
+            log.pop(0)
+        if len(log) > 1000:
+            del log[0]
+
+    def _sample_noise(self):
+        """Every NOISE_EVERY_MS, read the instantaneous RSSI while nothing is being received:
+        that is the noise floor. Skipped when the radio lock is busy or a packet waits."""
+        if simulation_mode or not self._radio_ready or self._radio is None:
+            return
+        now = self._now_ms()
+        if self._last_noise_ms is not None and now - self._last_noise_ms < NOISE_EVERY_MS:
+            return
+        reader = getattr(self._radio, "getRssiInst", None)
+        if reader is None or not self._radio_lock.acquire(0):
+            return
+        try:
+            if self._radio.getIrqStatus():
+                return                      # something to receive first
+            dbm = reader()
+        except Exception as e:
+            print("MeshCoreManager: noise sample failed:", repr(e))
+            return
+        finally:
+            self._radio_lock.release()
+        self._last_noise_ms = now
+        self._noise.append(dbm)
+        if len(self._noise) > NOISE_SAMPLES:
+            del self._noise[0]
+
+    def radio_stats(self):
+        """Figures for the Radio tab; reads only what the worker recorded (no SPI)."""
+        now = self._now_ms()
+        hour_ago = now - STATS_WINDOW_MS
+        half_hour_ago = now - STATS_WINDOW_MS // 2
+        rx_hour = [e for e in self._rx_log if e[0] - hour_ago >= 0]
+        rx_half = [e[1] for e in rx_hour if e[0] - half_hour_ago >= 0 and e[1] is not None]
+        tx_ms = sum(e[1] for e in self._tx_log if e[0] - hour_ago >= 0)
+        elapsed = min(max(now - self._stats_start_ms, 1), STATS_WINDOW_MS)
+        return {
+            "noise_dbm": self._noise[-1] if self._noise else None,
+            "noise_series": list(self._noise),
+            "peak_rssi_30m": max(rx_half) if rx_half else None,
+            "packets_per_h": len(rx_hour),
+            "tx_air_pct": round(tx_ms * 100.0 / elapsed, 1),
+            "last_rx_s": None if self._last_rx_ms is None else (now - self._last_rx_ms) // 1000,
+            "rx_on": bool(self._radio_ready),
+        }
+
     # --- radio preset ------------------------------------------------------- #
     def radio_preset(self):
         """The active preset dict (id, freq, bw, sf, cr; name for the built-in ones)."""
+        if self._preset is not None:
+            return self._preset
         stored = None
         try:
             from mpos import SharedPreferences
             stored = SharedPreferences(NICKNAME_PREFS).get_dict("radio", None)
         except Exception as e:
             print("MeshCore: radio preset read error:", repr(e))
-        return meshcore_presets.resolve(stored)
+        self._preset = meshcore_presets.resolve(stored)
+        return self._preset
 
     def set_radio_preset(self, preset):
         """Store a preset (a built-in id, or a custom dict with freq/bw/sf/cr) and retune
@@ -245,6 +311,7 @@ class MeshCoreManager:
         except Exception as e:
             print("MeshCore: radio preset write error:", repr(e))
             return
+        self._preset = None
         if self._running:
             self.restart()
 
@@ -799,6 +866,7 @@ class MeshCoreManager:
                 if err == 0 and msg and len(msg) > 0:
                     self._rx_queue.append((bytes(msg), rssi, snr))
                     self._last_rx_ms = self._now_ms()
+                    self._log_stat(self._rx_log, (self._last_rx_ms, rssi))
                     got = True
                 else:
                     print("MeshCoreManager: recv err=%s"
@@ -990,6 +1058,7 @@ class MeshCoreManager:
             #    any coalesced DM-history writes, then sleep briefly. No auto-advert.
             if not did_rx and not did_proc and not did_tx:
                 self._rx_watchdog()
+                self._sample_noise()
                 if self._retries:
                     try:
                         self._retry_tick()
@@ -2018,6 +2087,7 @@ class MeshCoreManager:
             if ok:
                 self._last_tx_ms = self._now_ms()
                 self._tx_count += 1
+                self._log_stat(self._tx_log, (self._last_tx_ms, self._time_on_air_ms(len(raw))))
         except Exception as e:
             print("MeshCoreManager: TX exception:", repr(e))
         finally:
