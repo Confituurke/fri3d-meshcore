@@ -37,17 +37,11 @@ from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_m
 import meshcore_crypto   # noqa: F401
 import meshcore_dm       # noqa: F401
 import meshcore_radio    # noqa: F401
+import meshcore_presets  # noqa: F401
 
-MESHCORE_RADIO = dict(
-    freq=869.618, bw=62.5, sf=8,
-    cr=8,   # 4/8 -- the MeshCore config used in Belgium (must match the local network)
-    syncWord=0x12,
-    preambleLength=16,
-    implicit=False, crcOn=True,
-    tcxoVoltage=3.0,
-    useRegulatorLDO=False, blocking=True,
-    currentLimit=140.0, power=22,
-)
+# begin() keywords for the default preset (EU/UK Narrow); bring-up uses the stored preset.
+MESHCORE_RADIO = meshcore_presets.radio_kwargs(
+    meshcore_presets.by_id(meshcore_presets.DEFAULT_PRESET))
 
 class _DummyLock:
     """No-op lock for desktop simulation / ports without _thread."""
@@ -198,6 +192,38 @@ class MeshCoreManager:
             "nodes": len(self._nodes),
             "contacts": len(self._contacts),
         }
+
+    # --- radio preset ------------------------------------------------------- #
+    def radio_preset(self):
+        """The active preset dict (id, freq, bw, sf, cr; name for the built-in ones)."""
+        stored = None
+        try:
+            from mpos import SharedPreferences
+            stored = SharedPreferences(NICKNAME_PREFS).get_dict("radio", None)
+        except Exception as e:
+            print("MeshCore: radio preset read error:", repr(e))
+        return meshcore_presets.resolve(stored)
+
+    def set_radio_preset(self, preset):
+        """Store a preset (a built-in id, or a custom dict with freq/bw/sf/cr) and retune
+        the radio when it is running."""
+        if isinstance(preset, str):
+            if meshcore_presets.by_id(preset) is None:
+                raise ValueError("unknown preset %r" % preset)
+            stored = {"id": preset}
+        else:
+            stored = {"id": "custom", "freq": float(preset["freq"]), "bw": preset["bw"],
+                      "sf": int(preset["sf"]), "cr": int(preset["cr"])}
+        try:
+            from mpos import SharedPreferences
+            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed.put_dict("radio", stored)
+            ed.commit()
+        except Exception as e:
+            print("MeshCore: radio preset write error:", repr(e))
+            return
+        if self._running:
+            self.restart()
 
     # --- background-service enable toggle (app-local pref, live) ------------ #
     def is_service_enabled(self):
@@ -604,7 +630,7 @@ class MeshCoreManager:
             # one (MicroPythonOS#229) renames every method. Returns it untouched on the
             # driver 0.17.x ships, so this costs nothing today.
             self._radio = meshcore_radio.adapt(LoRaManager.radioChip)
-            state = self._radio.begin(**MESHCORE_RADIO)
+            state = self._radio.begin(**meshcore_presets.radio_kwargs(self.radio_preset()))
             print("MeshCoreManager: begin state=%s (attempt %d)" % (state, attempt))
             if state == 0:
                 break
@@ -1726,22 +1752,8 @@ class MeshCoreManager:
         rec["sent_ms"] = self._now_ms()
 
     def _time_on_air_ms(self, payload_len):
-        """LoRa time-on-air (ms) for our fixed PHY: SF8, BW 62.5 kHz, CR 4/8, 16-symbol
-        preamble, explicit header, CRC on.  Used to blind-wait a TX to completion without
-        touching SPI (see _transmit)."""
-        sf = 8
-        bw = 62500.0
-        cr = 4          # coding rate 4/(4+cr) -> 4/8
-        n_pre = 16
-        crc = 1
-        ih = 0          # explicit header
-        de = 0          # low-data-rate optimise off (T_sym < 16 ms)
-        t_sym = (1 << sf) / bw
-        t_pre = (n_pre + 4.25) * t_sym
-        num = 8 * payload_len - 4 * sf + 28 + 16 * crc - 20 * ih
-        den = 4 * (sf - 2 * de)
-        n_payload = 8 + max(((num + den - 1) // den) * (cr + 4), 0)  # ceil(num/den)*(cr+4)
-        return int((t_pre + n_payload * t_sym) * 1000)
+        """LoRa time on air (ms) of a packet on the active preset."""
+        return meshcore_presets.airtime_ms(self.radio_preset(), payload_len)
 
     def _transmit(self, raw):
         if simulation_mode:
