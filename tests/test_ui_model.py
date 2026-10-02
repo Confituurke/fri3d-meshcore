@@ -134,6 +134,24 @@ def test_node_rows_meta_and_age_colors():
     _assert(len(ui.node_rows(nodes, now_ms, "new")) == 1)
 
 
+def test_node_detail():
+    ui = _ui()
+    now_ms = 10 * 3600 * 1000
+    pk = "f1a7" + "33" * 28 + "9c2e"
+    d = ui.node_detail({"pubkey": pk, "id": "f1", "type": 2, "name": "Gent-Noord", "snr": -3.5,
+                        "hops": 2, "heard_ms": now_ms - 840 * 1000, "verified": True,
+                        "lat": 51.05, "lon": 3.72}, now_ms)
+    _assert(d["title"] == "Gent-Noord")
+    _assert(d["subtitle"] == "repeater · F1A7…9C2E", d["subtitle"])
+    _assert(d["info"] == "2 hops · SNR −3.5 dB · heard 14 min ago", d["info"])
+    _assert(("Location", "51.05000, 3.72000") in d["fields"], d["fields"])
+    _assert(("Signature", "verified") in d["fields"])
+    d2 = ui.node_detail({"pubkey": pk, "type": 1, "name": "", "snr": None, "hops": 0,
+                         "heard_ms": now_ms, "verified": False}, now_ms)
+    _assert(d2["subtitle"].startswith("companion · ") and d2["info"] == "direct · heard now", d2)
+    _assert(("Signature", "not checked") in d2["fields"])
+
+
 def test_age_text():
     ui = _ui()
     _assert([ui.age_text(s) for s in (5, 120, 3700, 3 * 86400)] == ["now", "2 min", "1 h", "3 d"])

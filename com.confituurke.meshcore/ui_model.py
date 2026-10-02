@@ -187,6 +187,28 @@ def node_rows(nodes, now_ms, filt="all", contacts=()):
     return rows
 
 
+_KIND_WORDS = {"chat": "companion", "rptr": "repeater", "room": "room server", "sensor": "sensor"}
+
+
+def node_detail(n, now_ms):
+    """Header and info lines for a node's detail screen."""
+    kind = _KINDS.get(n.get("type"), "other")
+    pk = (n.get("pubkey") or "").upper()
+    hops = n.get("hops") or 0
+    info = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+    if n.get("snr") is not None:
+        info += " · SNR %s dB" % snr_text(n["snr"])
+    age = age_text(max(0, (now_ms - n.get("heard_ms", now_ms)) // 1000))
+    info += " · heard now" if age == "now" else " · heard %s ago" % age
+    fields = [("Type", _KIND_WORDS.get(kind, kind)), ("Public key", pk.lower())]
+    if n.get("lat") is not None and n.get("lon") is not None:
+        fields.append(("Location", "%.5f, %.5f" % (n["lat"], n["lon"])))
+    fields.append(("Signature", "verified" if n.get("verified") else "not checked"))
+    return {"title": n.get("name") or pk[:8] or "?",
+            "subtitle": "%s · %s…%s" % (_KIND_WORDS.get(kind, kind), pk[:4], pk[-4:]),
+            "info": info, "fields": fields}
+
+
 def preset_summary(p, power):
     """(title, detail, airtime) for the Radio tab's preset card."""
     title = p.get("name") or "Custom"

@@ -87,3 +87,21 @@ def open_thread(kind, key):
     ActivityNavigator.startActivity(intent)
     wait_for_render(20)
     return mpos.ui.screen_stack[-1][0]
+
+
+BOB = "b0" + "22" * 31
+GENT = "f1a7" + "33" * 28 + "9c2e"
+
+
+def seed_nodes(m):
+    """One companion (Bob, not a contact), two repeaters and a room server."""
+    now = m._now_ms()
+    for pk, typ, name, snr, hops, age_s in (
+            (BOB, 1, "Bob", 8.0, 0, 120),
+            (GENT, 2, "Gent-Noord", -3.5, 2, 840),
+            ("3a" + "44" * 31, 2, "Aalst-Kerk", 4.2, 3, 3600),
+            ("7c" + "55" * 31, 3, "Gent BBS", None, 1, 3 * 3600)):
+        m._nodes[pk] = {"pubkey": pk, "id": pk[:2], "type": typ, "name": name, "snr": snr,
+                        "hops": hops, "route": "flood" if hops else "direct",
+                        "heard_ms": now - age_s * 1000, "seq": 100 - age_s // 60,
+                        "verified": True, "timestamp": 1, "lat": None, "lon": None}
