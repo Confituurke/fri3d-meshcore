@@ -59,12 +59,14 @@ MAX_NODES = 100         # learned-companions cap (RAM; a busy camp adverts many 
 # hashes, so repeaters refuse to re-flood it and the recipient drops it before it can even
 # re-ack. MeshCore therefore keeps the MESSAGE identical (same text, so it is not a new
 # message) and only varies the bit that feeds the packet hash: the 2-bit `attempt` counter
-# in a DM's flags byte, and -- since group messages have neither an attempt field nor an ack
-# -- the timestamp of a channel message ("mostly an extra blob to help make packet_hash
-# unique", BaseChatMesh.cpp).
-RETRY_AFTER_MS = 15000      # no ack (DM) / no repeater echo (channel) within this -> resend
+# in a DM's flags byte. Channel messages are sent once, as the firmware does: a resend
+# could only vary the timestamp, and stock clients show that as a second message. A
+# repeater echoing it back is counted as "heard"; with no echo it is marked unheard and the
+# user can resend it as a new message.
+RETRY_AFTER_MS = 15000      # no ack (DM) / no repeater echo (channel) within this
 DM_MAX_SENDS = 4            # attempts 0..3 -- MeshCore keeps the attempt in 2 bits
-CH_MAX_SENDS = 3
+CH_RESEND_WINDOW_S = 3      # older clients resend channel text with ts+1, ts+2: show once
+MAX_OWN_HASHES = 32         # our recent channel packets, to recognise repeater echoes
 
 # Radio re-init rate limit. Doubles per consecutive failure, resets once RX is healthy --
 # see _attempt_reinit for why an unrecoverable radio must go quiet rather than keep resetting.
@@ -120,6 +122,8 @@ class MeshCoreManager:
         self._nodes = {}                         # pubkey_hex -> node dict
         self._seen = []                          # recent packet hashes (dedup, FIFO)
         self._seen_set = set()
+        self._own = {}                           # our channel packet hash -> (channel, msg)
+        self._own_order = []
         self._channels = [PUBLIC_CHANNEL]        # Channel objects
         self._messages = {PUBLIC_CHANNEL.name: []}   # channel name -> [msg dicts]
         self._dm_messages = {}                   # contact pubkey_hex -> [msg dicts] (persisted)
@@ -813,28 +817,35 @@ class MeshCoreManager:
         finally:
             self._radio_lock.release()
 
-    def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0):
+    def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0, on_sent=None):
         """Queue an outgoing packet, due `delay_ms` (+ up to `jitter_ms`) from now; the worker
-        transmits it in the first RX gap after that. All TX flows through here so the worker
-        thread is the SOLE owner of the radio (no cross-thread SPI)."""
+        transmits it in the first RX gap after that and then calls `on_sent(ok)`. All TX
+        flows through here so the worker thread is the SOLE owner of the radio (no
+        cross-thread SPI)."""
         due = self._now_ms() + delay_ms
         if jitter_ms > 0:
             due += self._rand_byte() * jitter_ms // 256
         i = len(self._tx_queue)
         while i > 0 and self._tx_queue[i - 1][0] > due:   # keep it sorted, FIFO among equals
             i -= 1
-        self._tx_queue.insert(i, (due, bytes(raw)))
+        self._tx_queue.insert(i, (due, bytes(raw), on_sent))
 
     def _drain_tx(self):
         """Transmit the earliest queued packet if it is due; True if one went out (or was
         attempted)."""
         if not self._tx_queue or self._tx_queue[0][0] - self._now_ms() > 0:
             return False
-        _, raw = self._tx_queue.pop(0)
+        _, raw, on_sent = self._tx_queue.pop(0)
+        ok = False
         try:
-            self._transmit(raw)
+            ok = self._transmit(raw)
         except Exception as e:
             print("MeshCoreManager: tx drain error:", repr(e))
+        if on_sent is not None:
+            try:
+                on_sent(ok)
+            except Exception as e:
+                print("MeshCoreManager: on_sent error:", repr(e))
         return True
 
     def _rx_watchdog(self):
@@ -998,8 +1009,10 @@ class MeshCoreManager:
             h = pkt.packet_hash()
         except Exception:
             h = None
-        if h is not None and not self._remember(h):
+        if h is not None and h in self._own:
             self._note_echo(h)      # one of OUR packets, re-flooded by a repeater
+            return
+        if h is not None and not self._remember(h):
             return
         if pkt.path_hash_count():   # this copy travelled through at least one repeater
             self._repeater_heard = True
@@ -1117,7 +1130,7 @@ class MeshCoreManager:
             "incoming": True,
         }
         if self._dup_message(("ch", decoded["channel"], msg["sender"], msg["text"]),
-                             msg["ts"], window=CH_MAX_SENDS):
+                             msg["ts"], window=CH_RESEND_WINDOW_S):
             print("MeshCore [%s] %s: (resend, already shown)" % (decoded["channel"], msg["sender"]))
             return True
         print("MeshCore [%s] %s: %s  (%s)" % (decoded["channel"], msg["sender"], msg["text"], meta))
@@ -1379,68 +1392,62 @@ class MeshCoreManager:
         return self._mark_delivered(ack)
 
     def _note_echo(self, h):
-        """We heard one of our own packets come back: a repeater re-flooded it. For a channel
-        message that IS the delivery proof (channels have no ack), so stop retrying it. A DM
-        echo proves nothing about the recipient, so those keep waiting for the real ack."""
+        """We heard one of our own channel packets come back: a repeater re-flooded it. That
+        is the only delivery proof a channel offers, so count it. (A DM echo proves nothing
+        about the recipient; DMs wait for the real ack.)"""
+        channel, msg = self._own[h]
+        msg["heard"] = msg.get("heard", 0) + 1
+        msg["unheard"] = False
         for rec in self._retries:
-            if rec["kind"] == "ch" and rec.get("hash") == h:
-                rec["msg"]["confirmed"] = True
+            if rec["kind"] == "ch" and rec["msg"] is msg:
                 self._retries.remove(rec)
-                print("MeshCore: channel message relayed by a repeater")
-                self._notify("message", (rec["channel"], rec["msg"]))
-                return
+                break
+        self._notify("message", (channel, msg))
+
+    def _remember_own(self, h, channel, msg):
+        self._own[h] = (channel, msg)
+        self._own_order.append(h)
+        while len(self._own_order) > MAX_OWN_HASHES:
+            self._own.pop(self._own_order.pop(0), None)
 
     def _retry_tick(self):
-        """Resend anything that wasn't acked (DM) or relayed (channel) within RETRY_AFTER_MS."""
+        """Resend a DM that wasn't acked within RETRY_AFTER_MS; mark a channel message that no
+        repeater echoed within that time as unheard."""
         for rec in list(self._retries):
-            if self._ms_since(rec.get("sent_ms")) < RETRY_AFTER_MS:
-                continue
+            sent = rec.get("sent_ms")
+            if sent is None or self._ms_since(sent) < RETRY_AFTER_MS:
+                continue                     # still queued, or not yet timed out
             msg = rec["msg"]
             if rec["kind"] == "ch":
-                if not self._repeater_heard:
-                    # No repeater is relaying around here, so there is nothing that could have
-                    # confirmed it -- and a resend would only hand the neighbours who already
-                    # heard it a second copy. Leave the message unmarked rather than spam.
-                    self._retries.remove(rec)
-                    continue
-                if rec["attempt"] + 1 >= CH_MAX_SENDS:
-                    self._give_up(rec)
-                    continue
-                rec["attempt"] += 1
-                msg["attempt"] = rec["attempt"]
-                self._tx_group(rec)
-                print("MeshCore: no repeater echo, resending to #%s (attempt %d)"
-                      % (rec["channel"], rec["attempt"] + 1))
-                self._notify("message", (rec["channel"], msg))
-            else:
-                if rec.get("direct"):
-                    # It went out on the learned route and was not acked, so that route is
-                    # stale (a repeater moved/died). Forget it: the resend floods and the
-                    # contact will teach us the new route with its next PATH return.
-                    self._reset_path(rec["pubkey"])
-                if rec["attempt"] + 1 >= DM_MAX_SENDS:
-                    self._give_up(rec)
-                    continue
-                rec["attempt"] += 1
-                msg["attempt"] = rec["attempt"]
-                self._tx_dm(rec)
-                print("MeshCore: no ack, resending DM (attempt %d)" % (rec["attempt"] + 1))
-                self._notify("dm", (rec["pubkey"], msg))
+                self._retries.remove(rec)
+                if not msg.get("heard"):
+                    msg["unheard"] = True
+                    self._notify("message", (rec["channel"], msg))
+                continue
+            if rec.get("direct"):
+                # It went out on the learned route and was not acked, so that route is
+                # stale (a repeater moved/died). Forget it: the resend floods and the
+                # contact will teach us the new route with its next PATH return.
+                self._reset_path(rec["pubkey"])
+            if rec["attempt"] + 1 >= DM_MAX_SENDS:
+                self._give_up(rec)
+                continue
+            rec["attempt"] += 1
+            msg["attempt"] = rec["attempt"]
+            self._tx_dm(rec)
+            print("MeshCore: no ack, resending DM (attempt %d)" % (rec["attempt"] + 1))
+            self._notify("dm", (rec["pubkey"], msg))
 
     def _give_up(self, rec):
-        """Out of attempts -- mark the message failed so the chat can show it."""
+        """Out of attempts -- mark the DM failed so the chat can offer a resend."""
         rec["msg"]["failed"] = True
         try:
             self._retries.remove(rec)
         except ValueError:
             pass
-        if rec["kind"] == "ch":
-            print("MeshCore: giving up on the #%s message" % rec["channel"])
-            self._notify("message", (rec["channel"], rec["msg"]))
-        else:
-            print("MeshCore: giving up on the DM (no ack after %d sends)" % DM_MAX_SENDS)
-            self._save_history(rec["pubkey"])
-            self._notify("dm", (rec["pubkey"], rec["msg"]))
+        print("MeshCore: giving up on the DM (no ack after %d sends)" % DM_MAX_SENDS)
+        self._save_history(rec["pubkey"])
+        self._notify("dm", (rec["pubkey"], rec["msg"]))
 
     def _cancel_retry(self, msg):
         for rec in list(self._retries):
@@ -1497,7 +1504,7 @@ class MeshCoreManager:
             return (False, str(e))
         msg = {"ts": ts, "sender": self.nickname(), "text": text, "rssi": None,
                "incoming": False, "ack": None, "delivered": False,
-               "attempt": 0, "failed": False}
+               "attempt": 0, "failed": False, "tx": False}
         rec = {"kind": "dm", "pubkey": pubkey_hex, "msg": msg, "text": text, "ts": ts,
                "secret": secret, "pub": pub, "dst_hash": dst_hash, "attempt": 0, "acks": []}
         try:
@@ -1531,8 +1538,8 @@ class MeshCoreManager:
         rec["acks"].append(ack_hex)
         rec["msg"]["ack"] = ack_hex
         self._register_pending(ack_hex, rec["pubkey"], rec["msg"])
-        self._enqueue_tx(pkt.to_bytes())   # worker transmits in the next RX gap
-        rec["sent_ms"] = self._now_ms()
+        rec["sent_ms"] = None              # the retry clock starts when it is on the air
+        self._enqueue_tx(pkt.to_bytes(), on_sent=lambda ok: self._on_sent(rec, ok))
 
     def _add_dm(self, pubkey_hex, msg):
         lst = self._dm_messages.setdefault(pubkey_hex, [])
@@ -1767,32 +1774,67 @@ class MeshCoreManager:
             ts = 0
         # reflect our own message locally right away (the actual TX happens shortly)
         msg = {"ts": ts, "sender": self.nickname(), "text": text, "rssi": None,
-               "incoming": False, "attempt": 0, "confirmed": False, "failed": False}
+               "incoming": False, "tx": False, "heard": 0, "unheard": False}
         rec = {"kind": "ch", "channel": channel_name, "ch": ch, "msg": msg, "text": text,
                "ts": ts, "attempt": 0}
         self._tx_group(rec)
         self._add_message(channel_name, msg)
-        self._retries.append(rec)          # resent by _retry_tick if no repeater echoes it
+        self._retries.append(rec)          # marked unheard by _retry_tick if nothing echoes it
         self._notify("message", (channel_name, msg))
         return True
 
     def _tx_group(self, rec):
-        """Build and queue one attempt of a channel message. Group messages have no attempt
-        field and no ack, so a resend varies the timestamp instead -- MeshCore calls it
-        "mostly an extra blob to help make packet_hash unique". The text is untouched, so it
-        stays the same message. We remember our own packet hash: hearing it come back means a
-        repeater re-flooded it, which is the only delivery proof a channel offers."""
-        payload = encode_group_text(rec["ch"], self.nickname(), rec["text"],
-                                    rec["ts"] + rec["attempt"])
+        """Build and queue a channel message. We remember our own packet hash: hearing it
+        come back means a repeater re-flooded it, which is the only delivery proof a channel
+        offers."""
+        payload = encode_group_text(rec["ch"], self.nickname(), rec["text"], rec["ts"])
         pkt = MeshCorePacket(make_header(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_TXT),
                              encode_path_len(0), b"", payload)
         try:
-            rec["hash"] = pkt.packet_hash()
-            self._remember(rec["hash"])
+            h = pkt.packet_hash()
+            self._remember(h)
+            self._remember_own(h, rec["channel"], rec["msg"])
         except Exception:
-            rec["hash"] = None
-        self._enqueue_tx(pkt.to_bytes())   # worker transmits in the next RX gap
+            pass
+        rec["sent_ms"] = None
+        self._enqueue_tx(pkt.to_bytes(), on_sent=lambda ok: self._on_sent(rec, ok))
+
+    def _on_sent(self, rec, ok):
+        """A queued message went on the air (or the radio refused it)."""
+        if not ok:
+            return                          # stays "sending"; the next attempt or resend
         rec["sent_ms"] = self._now_ms()
+        msg = rec["msg"]
+        if not msg.get("tx"):
+            msg["tx"] = True
+            if rec["kind"] == "ch":
+                self._notify("message", (rec["channel"], msg))
+            else:
+                self._notify("dm", (rec["pubkey"], msg))
+
+    def resend(self, key, msg):
+        """Send a failed DM or an unheard channel message again, as a new message (fresh
+        timestamp, attempt 0) that replaces the old one. Returns False for anything still
+        in flight or not ours."""
+        if msg.get("incoming"):
+            return False
+        lst = self._messages.get(key)
+        is_channel = lst is not None and self.get_channel(key) is not None
+        if not is_channel:
+            lst = self._dm_messages.get(key)
+        if lst is None or not any(m is msg for m in lst):
+            return False
+        if not (msg.get("failed") or msg.get("unheard")):
+            return False
+        self._cancel_retry(msg)
+        for i, m in enumerate(lst):
+            if m is msg:
+                del lst[i]
+                break
+        if is_channel:
+            return self.send_group_text(key, msg["text"])
+        ok, _ = self.send_dm(key, msg["text"])
+        return ok
 
     def _time_on_air_ms(self, payload_len):
         """LoRa time on air (ms) of a packet on the active preset."""
