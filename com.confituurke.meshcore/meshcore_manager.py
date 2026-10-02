@@ -53,7 +53,15 @@ class _DummyLock:
 
 
 MAX_PACKETS = 100       # raw log cap
-MAX_MESSAGES = 200      # per-channel history cap
+MAX_MESSAGES = 200      # per-channel / per-contact history cap (RAM)
+CH_HISTORY_CAP = 50     # channel messages kept on flash, per channel
+FLUSH_EVERY_MS = 5000   # coalesce history/unread writes while the worker runs
+# Files next to config.json (each SharedPreferences() re-reads its whole file, so bulky
+# history stays out of the small settings file).
+DM_HISTORY_FILE = "dm_history.json"         # {"h": {pubkey_hex: [msg]}}
+CH_HISTORY_FILE = "channel_history.json"    # {"ch": {channel_name: [msg]}}
+UNREAD_FILE = "unread.json"                 # {"u": {key: count}, "m": [keys with a mention]}
+_CH_STORED = ("ts", "sender", "text", "incoming", "snr", "hops", "tx", "heard", "unheard")
 MAX_NODES = 100         # learned-nodes cap (RAM): companions, repeaters, rooms, sensors
 # Resends. A byte-identical packet is useless: every node keeps a "seen" table of packet
 # hashes, so repeaters refuse to re-flood it and the recipient drops it before it can even
@@ -138,7 +146,11 @@ class MeshCoreManager:
         self._bringup_in_progress = False        # guard: one radio bring-up thread at a time
         self._secrets_thread_running = False     # guard: one contact-secret precompute thread
         self._dirty_history = set()              # contact pubkey_hex with unsaved DM history
+        self._dirty_channels = set()             # channel names with unsaved history
+        self._unread_dirty = False
+        self._last_flush_ms = None
         self._unread = {}                        # channel name / contact pubkey_hex -> unread count
+        self._mentions = set()                   # keys whose unread messages mention us
         # --- status/diagnostics (stashed by the worker so the UI never does raw radio SPI) ---
         self._last_status_byte = None            # last SX1262 GetStatus byte (worker-read)
         self._last_rx_ms = None                  # ticks_ms of the last received packet
@@ -151,6 +163,8 @@ class MeshCoreManager:
         self._load_channels()
         self._seed_default_channels()
         self._load_contacts()
+        self._load_channel_history()
+        self._load_unread()
 
     def is_running(self):
         return self._running
@@ -557,6 +571,9 @@ class MeshCoreManager:
         self._channels = [c for c in self._channels if c.name != name]
         self._messages.pop(name, None)
         self._unread.pop(name, None)
+        self._mentions.discard(name)
+        self._unread_dirty = True
+        self._dirty_channels.add(name)       # flushing a channel with no list deletes it
         self._save_channels()
         self._notify("channels", None)
         return True
@@ -711,7 +728,7 @@ class MeshCoreManager:
                 meshcore_radio.lock_release("meshcore")
             finally:
                 self._radio_lock.release()
-        self._flush_dirty_history()   # persist any coalesced DM history before going idle
+        self._flush_dirty()   # persist any coalesced history before going idle
         print("MeshCoreManager: stopped")
 
     # --- per-contact shared-secret precompute (keep ECDH off UI/RX threads) - #
@@ -978,11 +995,10 @@ class MeshCoreManager:
                         self._retry_tick()
                     except Exception as e:
                         print("MeshCoreManager: retry error:", repr(e))
-                if self._dirty_history:
-                    self._flush_dirty_history()
+                self._flush_due()
                 time.sleep(0.02)   # portable (MicroPython + CPython)
         self._worker_running = False
-        self._flush_dirty_history()   # persist anything pending as the worker exits
+        self._flush_dirty()   # persist anything pending as the worker exits
 
     @staticmethod
     def _meta(rssi, snr):
@@ -1159,21 +1175,35 @@ class MeshCoreManager:
             return True
         print("MeshCore [%s] %s: %s  (%s)" % (decoded["channel"], msg["sender"], msg["text"], meta))
         self._add_message(decoded["channel"], msg)
-        self._bump_unread(decoded["channel"])
+        self._bump_unread(decoded["channel"], mention=self._mentions_us(msg["text"]))
         self._notify("message", (decoded["channel"], msg))
         self._post_notification(decoded["channel"], msg)
         return True
 
     # --- unread counters (channel name / contact pubkey_hex) ---------------- #
-    def _bump_unread(self, key):
+    def _bump_unread(self, key, mention=False):
         self._unread[key] = self._unread.get(key, 0) + 1
+        if mention:
+            self._mentions.add(key)
+        self._unread_dirty = True
 
     def get_unread(self, key):
         return self._unread.get(key, 0)
 
+    def get_mention(self, key):
+        """True while an unread message in this chat mentions us (@[nickname])."""
+        return key in self._mentions
+
     def clear_unread(self, key):
         """Called by a chat screen when it shows the messages (opened / new msg while open)."""
-        if self._unread.pop(key, 0):
+        had = self._unread.pop(key, 0)
+        if key in self._mentions:
+            self._mentions.discard(key)
+            had = True
+        if had:
+            self._unread_dirty = True
+            if not self._worker_running:
+                self._flush_dirty()
             self._notify("unread", key)
 
     # --- direct messages (1:1, X25519) ------------------------------------- #
@@ -1625,6 +1655,8 @@ class MeshCoreManager:
         del self._contacts[pubkey_hex]
         self._dm_messages.pop(pubkey_hex, None)
         self._unread.pop(pubkey_hex, None)
+        self._mentions.discard(pubkey_hex)
+        self._unread_dirty = True
         self._save_contacts()
         self._delete_history(pubkey_hex)   # drop the stored chat history too
         self._notify("contacts", None)
@@ -1636,10 +1668,18 @@ class MeshCoreManager:
             from mpos import SharedPreferences
             p = SharedPreferences(NICKNAME_PREFS)
             saved = p.get_dict("contacts", {}) or {}
-            histories = p.get_dict("dm_history", {}) or {}
+            legacy = p.get_dict("dm_history", None)
         except Exception as e:
             print("MeshCore: load contacts error:", repr(e))
-            saved, histories = {}, {}
+            saved, legacy = {}, None
+        histories = self._read_store(DM_HISTORY_FILE, "h")
+        if legacy:
+            # DM history used to live in config.json: carry it over, and drop it from there
+            # on the next flush.
+            for k, v in legacy.items():
+                histories.setdefault(k, v)
+            self._migrate_dm_history = True
+            self._dirty_history.update(k for k in legacy if k in saved)
         for pub_hex, entry in saved.items():
             try:
                 self._contacts[pub_hex] = {
@@ -1654,7 +1694,7 @@ class MeshCoreManager:
                     "path": self._unhex(entry.get("path")),
                     "path_raw": entry.get("path_raw", 0),
                 }
-                self._dm_messages[pub_hex] = list(histories.get(pub_hex, []))
+                self._dm_messages[pub_hex] = self._clean_history(histories.get(pub_hex), dm=True)
             except Exception as e:
                 print("MeshCore: skipping bad contact %r: %s" % (pub_hex, e))
 
@@ -1677,40 +1717,128 @@ class MeshCoreManager:
 
     def _save_history(self, pubkey_hex):
         """Mark a contact's DM history dirty; the worker coalesces the flash write (see
-        _flush_dirty_history). Avoids an O(n) full-list commit on every message AND its ACK,
-        and reduces flash wear. Writes immediately if there's no worker to coalesce."""
+        _flush_due). Writes immediately if there is no worker to coalesce."""
         if pubkey_hex not in self._contacts:
             return  # only contacts' history is stored
         self._dirty_history.add(pubkey_hex)
         if not self._worker_running:
-            self._flush_dirty_history()
-
-    def _flush_dirty_history(self):
-        """Persist any contacts whose DM history changed since the last flush."""
-        if not self._dirty_history:
-            return
-        pending = list(self._dirty_history)
-        self._dirty_history.clear()
-        for pub_hex in pending:
-            if pub_hex not in self._contacts:
-                continue
-            try:
-                from mpos import SharedPreferences
-                ed = SharedPreferences(NICKNAME_PREFS).edit()
-                ed.put_dict_item("dm_history", pub_hex, self._dm_messages.get(pub_hex, []))
-                ed.commit()
-            except Exception as e:
-                print("MeshCore: save history error:", repr(e))
+            self._flush_dirty()
 
     def _delete_history(self, pubkey_hex):
-        self._dirty_history.discard(pubkey_hex)
+        self._dirty_history.add(pubkey_hex)      # no longer a contact -> dropped on flush
+        if not self._worker_running:
+            self._flush_dirty()
+
+    def _mentions_us(self, text):
+        nick = self._nick or self.default_nickname()
+        return bool(nick) and ("@[%s]" % nick) in (text or "")
+
+    @staticmethod
+    def _read_store(filename, key):
+        """The dict under `key` in a history file, or {} when it is missing or unreadable."""
         try:
             from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
-            ed.remove_dict_item("dm_history", pubkey_hex)
-            ed.commit()
+            d = SharedPreferences(NICKNAME_PREFS, filename=filename).get_dict(key, {})
+            return d if isinstance(d, dict) else {}
         except Exception as e:
-            print("MeshCore: delete history error:", repr(e))
+            print("MeshCore: %s read error: %r" % (filename, e))
+            return {}
+
+    @staticmethod
+    def _clean_history(lst, dm):
+        """Stored messages that are well-formed. An outgoing message that was still in
+        flight when the device went down is offered for resend: no retry survives a reboot."""
+        out = []
+        if not isinstance(lst, list):
+            return out
+        for m in lst:
+            if not isinstance(m, dict) or not isinstance(m.get("text"), str):
+                continue
+            m = dict(m)
+            if not m.get("incoming"):
+                if dm and not m.get("delivered") and not m.get("failed"):
+                    m["failed"] = True
+                elif not dm and not m.get("heard"):
+                    m["unheard"] = True
+            out.append(m)
+        return out[-MAX_MESSAGES:]
+
+    def _load_channel_history(self):
+        stored = self._read_store(CH_HISTORY_FILE, "ch")
+        for ch in self._channels:
+            msgs = self._clean_history(stored.get(ch.name), dm=False)
+            if msgs:
+                self._messages[ch.name] = msgs
+
+    def _load_unread(self):
+        try:
+            from mpos import SharedPreferences
+            p = SharedPreferences(NICKNAME_PREFS, filename=UNREAD_FILE)
+            counts = p.get_dict("u", {})
+            mentions = p.get_list("m", [])
+        except Exception as e:
+            print("MeshCore: unread read error:", repr(e))
+            return
+        if isinstance(counts, dict):
+            for k, v in counts.items():
+                if isinstance(v, int) and v > 0:
+                    self._unread[k] = v
+        if isinstance(mentions, list):
+            self._mentions = set(k for k in mentions if isinstance(k, str))
+
+    def _flush_due(self):
+        """Worker idle hook: write pending history at most every FLUSH_EVERY_MS."""
+        if not (self._dirty_history or self._dirty_channels or self._unread_dirty):
+            return
+        now = self._now_ms()
+        if self._last_flush_ms is not None and now - self._last_flush_ms < FLUSH_EVERY_MS:
+            return
+        self._flush_dirty()
+
+    def _flush_dirty(self):
+        """Persist DM history, channel history and unread state that changed."""
+        self._last_flush_ms = self._now_ms()
+        try:
+            from mpos import SharedPreferences
+        except Exception:
+            return
+        if self._dirty_history or getattr(self, "_migrate_dm_history", False):
+            self._dirty_history.clear()
+            try:
+                data = {k: v for k, v in self._dm_messages.items() if k in self._contacts}
+                ed = SharedPreferences(NICKNAME_PREFS, filename=DM_HISTORY_FILE).edit()
+                ed.put_dict("h", data)
+                ed.commit()
+                if getattr(self, "_migrate_dm_history", False):
+                    ed = SharedPreferences(NICKNAME_PREFS).edit()
+                    ed.put_dict("dm_history", {})     # moved to its own file
+                    ed.commit()
+                    self._migrate_dm_history = False
+            except Exception as e:
+                print("MeshCore: save DM history error:", repr(e))
+        if self._dirty_channels:
+            self._dirty_channels.clear()
+            try:
+                data = {}
+                for ch in self._channels:
+                    msgs = self._messages.get(ch.name) or []
+                    if msgs:
+                        data[ch.name] = [{k: m.get(k) for k in _CH_STORED if k in m}
+                                         for m in msgs[-CH_HISTORY_CAP:]]
+                ed = SharedPreferences(NICKNAME_PREFS, filename=CH_HISTORY_FILE).edit()
+                ed.put_dict("ch", data)
+                ed.commit()
+            except Exception as e:
+                print("MeshCore: save channel history error:", repr(e))
+        if self._unread_dirty:
+            self._unread_dirty = False
+            try:
+                ed = SharedPreferences(NICKNAME_PREFS, filename=UNREAD_FILE).edit()
+                ed.put_dict("u", dict(self._unread))
+                ed.put_list("m", sorted(self._mentions))
+                ed.commit()
+            except Exception as e:
+                print("MeshCore: save unread error:", repr(e))
 
     def _post_dm_notification(self, pubkey_hex, name, msg):
         """Notify for an incoming DM unless the app is foreground (mirrors channels)."""
@@ -1947,6 +2075,11 @@ class MeshCoreManager:
             pass
 
     def _notify(self, event, data):
+        # Every change to a message is announced, so this is where history goes dirty.
+        if event == "message":
+            self._dirty_channels.add(data[0])
+        elif event == "dm" and data[0] in self._contacts:
+            self._dirty_history.add(data[0])
         for cb in list(self._subscribers):
             try:
                 cb(event, data)
