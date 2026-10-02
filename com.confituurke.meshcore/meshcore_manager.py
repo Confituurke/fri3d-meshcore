@@ -966,6 +966,8 @@ class MeshCoreManager:
         if time.ticks_diff(now, self._last_rx_check_ms) < 2000:
             return
         self._last_rx_check_ms = now
+        if self._bringup_in_progress:
+            return      # the start-up thread is configuring the chip; let it finish
         # Bring-up never completed / a previous re-init failed -> recovery is the only option.
         if not self._radio_ready:
             self._attempt_reinit(now)

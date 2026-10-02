@@ -111,5 +111,14 @@ def test_stop_does_not_cold_sleep():
     _assert("meshcore" in env.lora.released)
 
 
+def test_watchdog_waits_for_a_bring_up_in_progress():
+    env, m, chip = _setup()
+    m._radio_ready = False
+    m._bringup_in_progress = True       # the start-up thread is still configuring the chip
+    m._rx_watchdog()
+    _assert(m._reinit_count == 0, m._reinit_count)
+    _assert(env.lora.resets == 0, env.lora.resets)
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())
