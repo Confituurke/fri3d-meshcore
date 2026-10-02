@@ -73,3 +73,17 @@ def open_app(tab=0):
         act.select(tab)
         wait_for_render(10)
     return act
+
+
+def open_thread(kind, key):
+    """Open a channel (kind 'channel') or DM (kind 'dm') thread straight away."""
+    import mpos.ui
+    from mpos import Intent, wait_for_render
+    from mpos.activity_navigator import ActivityNavigator
+    import thread_activity
+    cls = thread_activity.ChannelChatActivity if kind == "channel" else thread_activity.DMChatActivity
+    intent = Intent(activity_class=cls, app_fullname=APP)
+    intent.putExtra("channel" if kind == "channel" else "pubkey", key)
+    ActivityNavigator.startActivity(intent)
+    wait_for_render(20)
+    return mpos.ui.screen_stack[-1][0]
