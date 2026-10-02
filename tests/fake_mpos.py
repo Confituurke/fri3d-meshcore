@@ -51,6 +51,8 @@ class FakeEnv:
         self.constructions = 0     # SharedPreferences(...) calls, i.e. file reads on device
         self.lora = None
         self.notifications = []
+        self.now_ms = 1000000      # fake time.ticks_ms() clock; tests advance it by hand
+        self.sleeps = []           # every time.sleep_ms() the code under test asked for
 
     def prefs(self, app, filename="config.json"):
         return self.store.setdefault((app, filename), {})
@@ -92,37 +94,49 @@ class FakeEnv:
         return SharedPreferences
 
 
-class FakeLoRaManager:
-    def __init__(self):
-        self.radioChip = None
-        self.holder_name = None
-        self.acquired = []
-        self.released = []
-        self.watchdog_stopped = False
-        self.resets = 0
+def make_fake_lora_manager():
+    """A fresh LoRaManager stand-in shaped like the real one: a class with static methods,
+    class attributes, and `holder` as a *property* (which reads as a property object when
+    looked up on the class, as apps do)."""
 
-    def acquire(self, name):
-        if self.holder_name not in (None, name):
-            return False
-        self.holder_name = name
-        self.acquired.append(name)
-        return True
+    class FakeLoRaManager:
+        radioChip = None
+        _holder = None
+        acquired = []
+        released = []
+        watchdog_stopped = False
+        resets = 0
 
-    def release(self, name):
-        if self.holder_name == name:
-            self.holder_name = None
-        self.released.append(name)
+        @staticmethod
+        def acquire(name):
+            if FakeLoRaManager._holder not in (None, name):
+                return False
+            FakeLoRaManager._holder = name
+            FakeLoRaManager.acquired.append(name)
+            return True
 
-    def stop_watchdog(self):
-        self.watchdog_stopped = True
+        @staticmethod
+        def release(name):
+            if FakeLoRaManager._holder == name:
+                FakeLoRaManager._holder = None
+            FakeLoRaManager.released.append(name)
 
-    def reset_chip(self):
-        self.resets += 1
-        return True
+        @staticmethod
+        def stop_watchdog():
+            FakeLoRaManager.watchdog_stopped = True
 
-    @property
-    def holder(self):
-        return self.holder_name
+        @staticmethod
+        def reset_chip():
+            FakeLoRaManager.resets += 1
+            return True
+
+        @property
+        def holder(self):
+            return FakeLoRaManager._holder
+
+    FakeLoRaManager.acquired = []
+    FakeLoRaManager.released = []
+    return FakeLoRaManager
 
 
 class _FakeInnerRadio:
@@ -230,10 +244,25 @@ class FakePolledChip:
         pass
 
 
+def _install_clock(env):
+    """MicroPython's ticks/sleep_ms on CPython, driven by env.now_ms (sleep_ms never blocks)."""
+    import time
+    time.ticks_ms = lambda: env.now_ms
+    time.ticks_diff = lambda a, b: a - b
+    time.ticks_add = lambda a, b: a + b
+
+    def sleep_ms(ms):
+        env.sleeps.append(ms)
+        env.now_ms += ms
+
+    time.sleep_ms = sleep_ms
+
+
 def install(native=None):
     """Install the fakes; returns the FakeEnv. Re-imports the app modules fresh."""
     env = FakeEnv()
-    env.lora = FakeLoRaManager()
+    env.lora = make_fake_lora_manager()
+    _install_clock(env)
     mpos = types.ModuleType("mpos")
     mpos.SharedPreferences = env.make_prefs_class()
     mpos.LoRaManager = env.lora

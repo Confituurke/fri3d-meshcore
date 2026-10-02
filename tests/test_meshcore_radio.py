@@ -40,6 +40,9 @@ class FakeRadio:
     def sleep(self, warm_start=True):
         self.slept = warm_start
 
+    def calibrate_image(self):
+        pass
+
 
 class FakePolled:
     """Stands in for mpos.polled_sx126x.PolledSX126x (the lora-upstream branch)."""
@@ -141,10 +144,11 @@ def test_every_translated_method_reaches_its_snake_case_name():
                              "get_status", "get_packet_status"], polled.calls)
 
 
-def test_rssi_and_snr_are_properties_upstream_not_methods():
+def test_rssi_and_snr_decode_the_packet_status():
+    # GetPacketStatus = 0x112233: RssiPkt 0x11 (-raw/2 dBm), SnrPkt 0x22 (signed raw/4 dB).
     a = adapt(FakePolled())
-    _assert(a.getRSSI() == -42.0)
-    _assert(a.getSNR() == 7.5)
+    _assert(a.getRSSI() == -8.5, a.getRSSI())
+    _assert(a.getSNR() == 8.5, a.getSNR())
 
 
 def test_send_and_recv_keep_their_tuple_shape():
@@ -240,7 +244,7 @@ def test_lock_calls_are_noops_without_the_framework():
 
 
 class _FakeLoRaManager:
-    holder = None
+    _holder = None
     _granted = True
     released = []
 
@@ -280,10 +284,10 @@ def test_lock_uses_the_framework_when_it_exposes_one():
 
         # Denied: another app holds the radio, and we must report who.
         _FakeLoRaManager._granted = False
-        _FakeLoRaManager.holder = "lora_chat"
+        _FakeLoRaManager._holder = "lora_chat"
         _assert(lock_acquire("meshcore") is False)
         _assert(lock_holder() == "lora_chat")
-        _FakeLoRaManager.holder = None
+        _FakeLoRaManager._holder = None
     _with_fake_mpos(body)
 
 

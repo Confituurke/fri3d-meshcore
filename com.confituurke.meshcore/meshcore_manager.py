@@ -589,6 +589,12 @@ class MeshCoreManager:
             print("MeshCoreManager: LoRa held by %s, not starting radio"
                   % (meshcore_radio.lock_holder(),))
             return False
+        # The framework starts its own radio watchdog on acquire. It polls the chip from the
+        # asyncio loop, outside our _radio_lock; ours (_rx_watchdog) runs on the worker under
+        # that lock, so only ours may touch the chip.
+        stop_wd = getattr(LoRaManager, "stop_watchdog", None)
+        if stop_wd is not None:
+            stop_wd()
         # One reset per bring-up, not one per attempt: a failed begin() gets a second
         # begin(), and only a bring-up that still fails resets again, with _attempt_reinit's
         # backoff keeping those far apart.
@@ -605,12 +611,12 @@ class MeshCoreManager:
             time.sleep_ms(200)  # bad begin -> settle and retry once
         # Configure RX regardless of the reported begin state (best effort).
         try:
-            # Non-blocking RX, but NO DIO1 interrupt handler (callback=None -> the driver
-            # arms continuous receive and calls clearDio1Action). We poll DIO1/IRQ from the
-            # worker thread instead (_poll_radio_rx): the soft pin IRQ ran in the main VM
-            # thread and got starved by another app's LVGL/LCD-DMA when backgrounded, which
-            # dropped packets. The worker thread runs regardless of the foreground app.
+            # No interrupt callback: the worker thread polls the IRQ status instead
+            # (_poll_radio_rx), so reception does not depend on which app is in front.
+            # Then arm continuous receive explicitly; dropping the callback does not.
             self._radio.setBlockingCallback(False, None)
+            self._radio.clearIrqStatus()
+            self._radio.startReceive()
             self._radio_ready = True
             print("MeshCoreManager: passive receive started, worker-polled (begin state=%s)" % state)
             return True
@@ -661,19 +667,13 @@ class MeshCoreManager:
         self._running = False
         self._radio_ready = False
         if not simulation_mode and self._radio is not None:
-            # hold the radio lock so we never sleep the chip while the worker is mid-SPI
+            # Hand the chip back under our radio lock, so the worker is never mid-SPI;
+            # LoRaManager.release() puts it in standby.
             self._radio_lock.acquire()
             try:
-                self._radio.sleep(retainConfig=False)
-            except Exception as e:
-                print("MeshCoreManager: stop/sleep error:", repr(e))
+                meshcore_radio.lock_release("meshcore")
             finally:
                 self._radio_lock.release()
-            # Hand the chip back to the framework only after our own worker has let go of
-            # it: this is the cross-app claim from _bring_up_radio, not the intra-app
-            # _radio_lock above, and releasing it early would let another app start driving
-            # the radio while we were still sleeping it.
-            meshcore_radio.lock_release("meshcore")
         self._flush_dirty_history()   # persist any coalesced DM history before going idle
         print("MeshCoreManager: stopped")
 
@@ -712,12 +712,12 @@ class MeshCoreManager:
     def _poll_radio_rx(self):
         """Poll for a received packet from the WORKER thread and enqueue it.
 
-        RX is serviced here rather than from a DIO1 pin interrupt: the soft IRQ ran via
-        micropython.schedule in the main VM thread and was starved whenever another app
-        held the CPU (its LVGL loop / LCD DMA on the shared SPI bus 2), so backgrounded RX
-        dropped most packets. The dedicated worker thread runs regardless of which app is
-        foreground. DIO1 is mapped to RX_DONE only, so a cheap GPIO read gates the (SPI)
-        status read. The lock serialises this against TX (both do SPI on bus 2).
+        RX is serviced here rather than from a DIO1 pin interrupt: a soft IRQ runs in the
+        main VM thread and is starved whenever another app holds the CPU, so backgrounded RX
+        would drop packets. The dedicated worker thread runs regardless of which app is in
+        front. Where the board wires DIO1, a cheap GPIO read gates the SPI status read;
+        otherwise the IRQ status is read over SPI on every poll. The lock serialises this
+        against TX.
 
         Returns True if a packet was received and queued.
         """
@@ -727,16 +727,21 @@ class MeshCoreManager:
             if not self._radio.irq.value():   # DIO1 low -> nothing pending (no SPI needed)
                 return False
         except Exception:
-            pass  # pin read unavailable -> fall through to the SPI status check
+            pass  # no DIO1 line -> the SPI IRQ-status read below is the check
         rc = meshcore_radio.consts(self._radio)
         got = False
         self._radio_lock.acquire()
         try:
             events = self._radio.getIrqStatus()
+            if not events:
+                # Nothing pending. Never re-arm here: going through standby would cut off a
+                # packet whose preamble is arriving right now.
+                return False
             if events & rc.RX_DONE:
-                rssi = self._radio.getRSSI()
+                rssi = self._radio.getRSSI()      # packet status first: recv() moves on
                 snr = self._radio.getSNR()
-                msg, err = self._radio.recv()   # re-arms RX + clears IRQ (via _readData)
+                msg, err = self._radio.recv()     # reads the FIFO and keeps RX armed
+                self._radio.clearIrqStatus()      # or the next poll re-reads the same RX_DONE
                 if err == 0 and msg and len(msg) > 0:
                     self._rx_queue.append((bytes(msg), rssi, snr))
                     self._last_rx_ms = self._now_ms()
@@ -745,13 +750,13 @@ class MeshCoreManager:
                     print("MeshCoreManager: recv err=%s"
                           % meshcore_radio.status_name(self._radio, err))
             else:
-                # DIO1 high but no RX_DONE (unexpected): clear and re-arm so we don't spin.
+                # CRC error / timeout / header error: drop the flags; continuous RX goes on.
                 self._radio.clearIrqStatus()
-                self._radio.startReceive()
         except Exception as e:
             # recv may have thrown before re-arming -> force RX back on so we don't stall.
             print("MeshCoreManager: rx poll exception:", repr(e))
             try:
+                self._radio.clearIrqStatus()
                 self._radio.startReceive()
             except Exception as e2:
                 print("MeshCoreManager: re-arm failed:", repr(e2))
@@ -760,13 +765,22 @@ class MeshCoreManager:
         return got
 
     def _rx_pending(self):
-        """True if a packet is waiting in the radio (DIO1 high) -- don't TX over it."""
+        """True if a received packet is waiting in the radio -- don't TX over it (a send
+        starts by draining and discarding the FIFO)."""
         if simulation_mode or self._radio is None:
             return False
         try:
             return bool(self._radio.irq.value())
         except Exception:
+            pass   # no DIO1 line -> ask the chip
+        if not self._radio_lock.acquire(0):
+            return True    # the worker is mid-SPI: not a gap
+        try:
+            return bool(self._radio.getIrqStatus() & meshcore_radio.consts(self._radio).RX_DONE)
+        except Exception:
             return False
+        finally:
+            self._radio_lock.release()
 
     def _enqueue_tx(self, raw):
         """Queue an outgoing packet; the worker transmits it in the next RX gap. All TX flows
@@ -1745,12 +1759,10 @@ class MeshCoreManager:
             _, result = self._radio.send(raw)   # non-blocking: returns immediately
             print("MeshCoreManager: TX result %s"
                   % meshcore_radio.status_name(self._radio, result))
-            # Wait out the airtime with NO SPI whatsoever. send() is non-blocking, so we must
-            # wait before re-arming RX -- but polling getIrqStatus() during TX collides with
-            # the LCD's DMA on the shared SPI bus 2 and WEDGES the radio (GetStatus -> 0x00).
-            # So we blind-sleep the computed time-on-air (a fixed 900 ms was too short for long
-            # packets like adverts, which then re-armed RX mid-TX -> standby/deaf).
-            time.sleep_ms(self._time_on_air_ms(len(raw)) + 120)
+            # A driver whose send() returns before the packet is out needs the airtime waited
+            # out before RX is re-armed; the polled driver waits for TX_DONE itself.
+            if not getattr(self._radio, "blocking_send", False):
+                time.sleep_ms(self._time_on_air_ms(len(raw)) + 120)
             ok = (result == 0)
             if ok:
                 self._last_tx_ms = self._now_ms()
