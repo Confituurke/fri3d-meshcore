@@ -8,7 +8,7 @@
   "category": "communication",
   "activities": [
     {
-      "entrypoint": "meshcore.py",
+      "entrypoint": "main_activity.py",
       "classname": "MeshCoreHome",
       "intent_filters": [
         {

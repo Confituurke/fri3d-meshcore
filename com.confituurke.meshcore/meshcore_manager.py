@@ -1939,7 +1939,7 @@ class MeshCoreManager:
             intent = None
             try:
                 from mpos import Intent
-                from meshcore import DMChatActivity
+                from thread_activity import DMChatActivity
                 intent = Intent(activity_class=DMChatActivity, extras={"pubkey": pubkey_hex})
             except Exception:
                 intent = None
@@ -1973,7 +1973,7 @@ class MeshCoreManager:
             intent = None
             try:
                 from mpos import Intent
-                from meshcore import ChannelChatActivity
+                from thread_activity import ChannelChatActivity
                 intent = Intent(activity_class=ChannelChatActivity,
                                 extras={"channel": channel_name})
             except Exception:
