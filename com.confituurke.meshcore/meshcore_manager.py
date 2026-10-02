@@ -144,6 +144,7 @@ class MeshCoreManager:
         self._reinit_count = 0                    # radio re-inits (wedge recoveries)
         self._reset_count = 0                     # radio hardware resets attempted
         self._reset_fail_count = 0                # ... of which the chip did not come back
+        self._load_identity()
         self._load_channels()
         self._seed_default_channels()
         self._load_contacts()
@@ -223,15 +224,27 @@ class MeshCoreManager:
             self.stop()
         self._notify("service", on)
 
-    def nickname(self):
+    def _load_identity(self):
+        """Read keypair + nickname from prefs once; the getters serve these cached copies.
+        (Every SharedPreferences() re-reads and parses the whole JSON file.)"""
+        self._pub = self._prv = None
+        self._nick = ""
         try:
+            import binascii
             from mpos import SharedPreferences
-            n = SharedPreferences(NICKNAME_PREFS).get_string("nickname", "")
-            if n:
-                return n
-        except Exception:
-            pass
-        return self.default_nickname()
+            p = SharedPreferences(NICKNAME_PREFS)
+            pub = p.get_string("identity_pub", "")
+            prv = p.get_string("identity_prv", "")
+            if pub and prv:
+                # MicroPython's unhexlify needs bytes (CPython also accepts str)
+                self._pub = binascii.unhexlify(pub.encode())
+                self._prv = binascii.unhexlify(prv.encode())
+            self._nick = p.get_string("nickname", "") or ""
+        except Exception as e:
+            print("MeshCore: identity load error:", repr(e))
+
+    def nickname(self):
+        return self._nick or self.default_nickname()
 
     def default_nickname(self):
         """MC-<first 4 hex of the public key>, so two nodes never share a default name.
@@ -253,6 +266,7 @@ class MeshCoreManager:
             ed = SharedPreferences(NICKNAME_PREFS).edit()
             ed.put_string("nickname", name)
             ed.commit()
+            self._nick = name
             return True
         except Exception as e:
             print("MeshCore: set_nickname error:", repr(e))
@@ -261,18 +275,7 @@ class MeshCoreManager:
     # --- identity (Ed25519 keypair) ---------------------------------------- #
     def get_identity(self):
         """Return (pubkey32, prv64) for this node, or (None, None) if not generated."""
-        try:
-            import binascii
-            from mpos import SharedPreferences
-            p = SharedPreferences(NICKNAME_PREFS)
-            pub = p.get_string("identity_pub", "")
-            prv = p.get_string("identity_prv", "")
-            if pub and prv:
-                # MicroPython's unhexlify needs bytes (CPython also accepts str)
-                return binascii.unhexlify(pub.encode()), binascii.unhexlify(prv.encode())
-        except Exception as e:
-            print("MeshCore: get_identity error:", repr(e))
-        return None, None
+        return self._pub, self._prv
 
     def has_identity(self):
         return self.get_identity()[0] is not None
@@ -285,8 +288,8 @@ class MeshCoreManager:
     def generate_identity(self):
         """Generate + persist a new MeshCore Ed25519 keypair.
 
-        SLOW (pure-Python scalar mult -- seconds on the badge); call off the UI thread.
-        Returns the 32-byte public key, or None on failure.
+        Seconds with the pure-Python fallback (milliseconds with meshcrypto); call it off
+        the UI thread. Returns the 32-byte public key, or None on failure.
         """
         try:
             pub, prv = meshcore_crypto.generate_keypair()
@@ -303,17 +306,14 @@ class MeshCoreManager:
             print("MeshCore: identity generated, node id 0x%02x" % pub[0])
         except Exception as e:
             print("MeshCore: save identity error:", repr(e))
+        self._pub, self._prv = pub, prv
         self._name_from_identity(pub)
         self._notify("identity", pub)
         return pub
 
     def _name_from_identity(self, pub):
         """Give an unnamed node a name derived from its brand-new key (MC-D5E4)."""
-        try:
-            from mpos import SharedPreferences
-            current = SharedPreferences(NICKNAME_PREFS).get_string("nickname", "")
-        except Exception:
-            current = ""
+        current = self._nick
         if current and current != "MC":         # the user picked a name -- leave it alone
             return
         name = "MC-%s" % pub.hex()[:4].upper()
@@ -404,7 +404,7 @@ class MeshCoreManager:
             ts = int(time.time())
             app_data = build_advert_appdata(ADV_TYPE_CHAT, self.nickname())
             message = advert_signed_message(pub, ts, app_data)
-            signature = meshcore_crypto.sign(prv, message)     # ~2s, radio still receiving
+            signature = meshcore_crypto.sign(prv, message, pub)
             payload = assemble_advert_payload(pub, ts, signature, app_data)
         except Exception as e:
             print("MeshCore: advert build failed:", repr(e))

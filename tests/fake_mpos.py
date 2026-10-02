@@ -307,3 +307,63 @@ def run_all(namespace):
         t()
         print("ok   %s" % t.__name__)
     print("\n%d/%d tests passed" % (len(tests), len(tests)))
+
+
+def make_fake_native():
+    """A stand-in for the native `meshcrypto` module (MeshCore's orlp ed25519).
+
+    It delegates to the pure-Python implementation, but holds the caller to the C module's
+    contract: sign() and derive_pub() take an already-clamped private key, because orlp uses
+    prv[:32] as the scalar as-is. `calls` counts uses per function.
+    """
+    mod = types.ModuleType("meshcrypto")
+    mod.calls = {}
+
+    def _count(name):
+        mod.calls[name] = mod.calls.get(name, 0) + 1
+
+    def _pure():
+        import meshcore_crypto
+        return meshcore_crypto
+
+    def _check_clamped(prv):
+        b0, b31 = prv[0], prv[31]
+        if b0 & 7 or b31 & 128 or not b31 & 64:
+            raise AssertionError("meshcrypto got an unclamped private key")
+
+    def _clamp(prv):
+        b = bytearray(prv)
+        b[0] &= 248
+        b[31] &= 63
+        b[31] |= 64
+        return bytes(b)
+
+    def create_keypair(seed):
+        _count("create_keypair")
+        prv = _clamp(_pure().sha512(seed))
+        return _pure()._pure_public_key(prv), prv
+
+    def derive_pub(prv):
+        _count("derive_pub")
+        _check_clamped(prv)
+        return _pure()._pure_public_key(prv)
+
+    def sign(msg, pub, prv):
+        _count("sign")
+        _check_clamped(prv)
+        return _pure()._pure_sign(prv, msg)
+
+    def verify(sig, msg, pub):
+        _count("verify")
+        return _pure()._pure_verify(pub, sig, msg)
+
+    def key_exchange(pub, prv):
+        _count("key_exchange")
+        return _pure()._pure_shared_secret(prv, pub)
+
+    mod.create_keypair = create_keypair
+    mod.derive_pub = derive_pub
+    mod.sign = sign
+    mod.verify = verify
+    mod.key_exchange = key_exchange
+    return mod

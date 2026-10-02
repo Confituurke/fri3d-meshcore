@@ -1,4 +1,4 @@
-"""MeshCore Ed25519 identity crypto -- pure Python, MicroPython-compatible.
+"""MeshCore Ed25519 identity crypto -- native when available, else pure Python.
 
 Vendored/adapted (MIT) from:
   * python-pure25519  Copyright (c) 2015 Brian Warner and contributors
@@ -11,11 +11,12 @@ is otherwise standard RFC 8032 Ed25519, so this module is wire-compatible with M
 orlp/ed25519 (verified against the RFC 8032 / pure25519 KAT vectors in the test).
 
 Provides: generate_keypair(), public_key_from_private(), sign(), verify(),
-meshcore_private_key(). (X25519 shared-secret for DMs is the next step.)
+shared_secret(), meshcore_private_key(), NATIVE.
 
-Note: pure-Python scalar multiplication is slow (seconds on ESP32). Our operations are
-rare -- keygen once, sign an advert every few minutes -- so this is acceptable; we still
-skip per-packet advert verification.
+When the firmware includes the `meshcrypto` C module (MeshCore's orlp ed25519), every
+operation goes through it: sign ~13 ms, verify ~24 ms, ECDH ~20 ms on an ESP32-S3. The
+pure-Python fallback takes seconds per operation there, so advert verification is only
+enforced when NATIVE is True.
 """
 
 # --------------------------------------------------------------------------- #
@@ -300,45 +301,23 @@ def meshcore_private_key(seed):
     return sha512(seed)
 
 
-def public_key_from_private(prv64):
-    """Derive the 32-byte Ed25519 public key from a MeshCore 64-byte private key."""
+def _pure_public_key(prv64):
     return _publickey(MCKey(prv64))
 
 
-def generate_keypair(seed=None):
-    """Create a MeshCore identity: returns (public_key[32], private_key[64]).
-
-    Private key is SHA512(seed).  Retries if the public key's first byte (the node's
-    routing id) is 0x00 or 0xff, which MeshCore reserves.
-    """
-    import os
-    while True:
-        s = seed if seed is not None else os.urandom(32)
-        prv64 = meshcore_private_key(s)
-        pub = public_key_from_private(prv64)
-        if pub[0] != 0x00 and pub[0] != 0xff:
-            return pub, prv64
-        if seed is not None:
-            # caller-supplied seed: don't loop forever, just return it
-            return pub, prv64
-
-
-def sign(prv64, message):
-    """Ed25519-sign `message` with a MeshCore 64-byte private key. Returns 64-byte sig."""
+def _pure_sign(prv64, message):
     key = MCKey(prv64)
-    pub = _publickey(key)
-    return _signature(message, key, pub)
+    return _signature(message, key, _publickey(key))
 
 
-def verify(pub32, signature, message):
-    """Verify an Ed25519 signature. Returns True/False. (Slow -- use sparingly.)"""
+def _pure_verify(pub32, signature, message):
     try:
         return _checkvalid(signature, message, pub32)
     except Exception:
         return False
 
 
-def shared_secret(prv64, other_public_key):
+def _pure_shared_secret(prv64, other_public_key):
     """X25519 ECDH shared secret with another node's Ed25519 public key (for DMs).
 
     Port of MeshCore's ed25519_key_exchange (via meshcore-pi): convert the peer's Ed25519
@@ -406,3 +385,93 @@ def _publickey_from_seed(seed):
 
 def _sign_with_seed(seed, message):
     return _signature(message, seed, _publickey(seed))
+
+
+# --------------------------------------------------------------------------- #
+# Public API: the native `meshcrypto` module (MeshCore's own ed25519, in C) when the
+# firmware has it -- milliseconds instead of seconds per operation -- else pure Python.
+# --------------------------------------------------------------------------- #
+try:
+    import meshcrypto as _native
+except ImportError:
+    _native = None
+
+NATIVE = _native is not None
+
+
+def _clamp(prv64):
+    """Ed25519-clamp the scalar half of a 64-byte private key; the nonce half is kept.
+
+    MeshCore's C code stores the key already clamped and uses prv[:32] as the scalar as-is,
+    while a key made by the pure-Python path is the raw SHA512(seed). Clamping is
+    idempotent, and the pure-Python path clamps internally anyway, so clamping on the way
+    into the native module keeps old and new identities producing the same signatures."""
+    b = bytearray(prv64)
+    b[0] &= 248
+    b[31] &= 63
+    b[31] |= 64
+    return bytes(b)
+
+
+def public_key_from_private(prv64):
+    """Derive the 32-byte Ed25519 public key from a MeshCore 64-byte private key."""
+    if _native is not None:
+        return _native.derive_pub(_clamp(prv64))
+    return _pure_public_key(prv64)
+
+
+def generate_keypair(seed=None):
+    """Create a MeshCore identity: returns (public_key[32], private_key[64]).
+
+    Retries if the public key's first byte (the node's routing id) is 0x00 or 0xff, which
+    MeshCore reserves.
+    """
+    import os
+    while True:
+        s = seed if seed is not None else os.urandom(32)
+        if _native is not None:
+            pub, prv64 = _native.create_keypair(s)
+        else:
+            prv64 = meshcore_private_key(s)
+            pub = _pure_public_key(prv64)
+        if pub[0] != 0x00 and pub[0] != 0xff:
+            return pub, prv64
+        if seed is not None:
+            # caller-supplied seed: don't loop forever, just return it
+            return pub, prv64
+
+
+def sign(prv64, message, pub=None):
+    """Ed25519-sign `message` with a MeshCore 64-byte private key. Returns a 64-byte sig.
+
+    Pass the matching public key when it is known; otherwise it is derived (one extra
+    scalar multiplication)."""
+    if _native is not None:
+        prv = _clamp(prv64)
+        if pub is None:
+            pub = _native.derive_pub(prv)
+        return _native.sign(message, pub, prv)
+    return _pure_sign(prv64, message)
+
+
+def verify(pub32, signature, message):
+    """Verify an Ed25519 signature. Returns True/False."""
+    if len(pub32) != 32 or len(signature) != 64:
+        return False
+    if _native is not None:
+        try:
+            return bool(_native.verify(signature, message, pub32))
+        except Exception:
+            return False
+    return _pure_verify(pub32, signature, message)
+
+
+def shared_secret(prv64, other_public_key):
+    """X25519 ECDH shared secret with another node's Ed25519 public key (for DMs).
+
+    Both parties compute the same 32 bytes."""
+    if len(other_public_key) != 32:
+        raise ValueError("public key must be 32 bytes")
+    if _native is not None:
+        return _native.key_exchange(other_public_key, prv64)
+    return _pure_shared_secret(prv64, other_public_key)
