@@ -43,6 +43,22 @@ import meshcore_presets  # noqa: F401
 MESHCORE_RADIO = meshcore_presets.radio_kwargs(
     meshcore_presets.by_id(meshcore_presets.DEFAULT_PRESET))
 
+# MeshCore timestamps are Unix seconds; MicroPython on the ESP32 counts from 2000-01-01.
+EPOCH_2000_OFFSET = 946684800
+
+
+def unix_time():
+    """Seconds since 1970-01-01 UTC, whatever epoch this port's time.time() uses."""
+    import time
+    t = int(time.time())
+    try:
+        if time.gmtime(0)[0] == 2000:
+            t += EPOCH_2000_OFFSET
+    except Exception:
+        pass
+    return t
+
+
 class _DummyLock:
     """No-op lock for desktop simulation / ports without _thread."""
     def acquire(self, *a):
@@ -518,7 +534,7 @@ class MeshCoreManager:
         if pub is None:
             return (False, "no identity -- generate one first")
         try:
-            ts = int(time.time())
+            ts = unix_time()
             app_data = build_advert_appdata(ADV_TYPE_CHAT, self.nickname())
             message = advert_signed_message(pub, ts, app_data)
             signature = meshcore_crypto.sign(prv, message, pub)
@@ -1621,7 +1637,7 @@ class MeshCoreManager:
         try:
             import binascii
             import time
-            ts = int(time.time())
+            ts = unix_time()
             dst_hash = binascii.unhexlify(pubkey_hex.encode())[0]
         except Exception as e:
             print("MeshCore: dm encode error:", repr(e))
@@ -1992,7 +2008,7 @@ class MeshCoreManager:
             return False
         try:
             import time
-            ts = int(time.time())
+            ts = unix_time()
         except Exception:
             ts = 0
         # reflect our own message locally right away (the actual TX happens shortly)
