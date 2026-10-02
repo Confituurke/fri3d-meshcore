@@ -425,3 +425,18 @@ def drain(m):
     while m._drain_tx():
         n += 1
     return n
+
+
+def advert_frame(seed, name, ts, node_type=1, route=1, path=b"", tamper=False):
+    """A signed ADVERT packet from the node whose key comes from `seed`."""
+    import meshcore_crypto as mc
+    from meshcore_advert import build_advert_appdata, advert_signed_message, assemble_advert_payload
+    from meshcore_packet import MeshCorePacket, make_header, encode_path_len, PAYLOAD_TYPE_ADVERT
+    pub, prv = mc.generate_keypair(seed=seed)
+    app = build_advert_appdata(node_type, name)
+    sig = mc.sign(prv, advert_signed_message(pub, ts, app), pub)
+    if tamper:
+        sig = bytes([sig[0] ^ 1]) + sig[1:]
+    payload = assemble_advert_payload(pub, ts, sig, app)
+    return pub, MeshCorePacket(make_header(route, PAYLOAD_TYPE_ADVERT),
+                               encode_path_len(len(path)), path, payload).to_bytes()

@@ -7,8 +7,8 @@
 # attach as a data source.
 #
 # Data model (all lvgl-free; UI subscribes via add_subscriber and marshals to LVGL):
-#   - nodes     : neighbors/repeaters learned from ADVERT packets (UNVERIFIED -- Ed25519
-#                 signatures are not checked; see meshcore_advert.py)
+#   - nodes     : companions, repeaters and rooms learned from ADVERT packets (signature
+#                 checked when the native meshcrypto module is present)
 #   - channels  : public group channels (default "Public" + user-added), Channel objects
 #   - messages  : per-channel chat history (public group text, decoded)
 #   - packets   : raw parsed-packet log (debug)
@@ -54,7 +54,7 @@ class _DummyLock:
 
 MAX_PACKETS = 100       # raw log cap
 MAX_MESSAGES = 200      # per-channel history cap
-MAX_NODES = 100         # learned-companions cap (RAM; a busy camp adverts many badges)
+MAX_NODES = 100         # learned-nodes cap (RAM): companions, repeaters, rooms, sensors
 # Resends. A byte-identical packet is useless: every node keeps a "seen" table of packet
 # hashes, so repeaters refuse to re-flood it and the recipient drops it before it can even
 # re-ack. MeshCore therefore keeps the MESSAGE identical (same text, so it is not a new
@@ -425,11 +425,12 @@ class MeshCoreManager:
             return (False, str(e))
 
     # --- advertising -------------------------------------------------------- #
-    def advertise(self):
-        """Build, Ed25519-sign, and flood a self-advert so peers learn our identity/name.
+    def advertise(self, flood=True):
+        """Build and Ed25519-sign a self-advert so peers learn our identity/name.
 
-        Requires an identity.  Signing is slow (~2s) but done before touching the radio,
-        so RX stays up during it.  Returns (ok, err).
+        flood=True floods it through the whole mesh; flood=False sends it zero-hop (route
+        DIRECT, empty path), so only direct neighbours hear it (Mesh::sendZeroHop).
+        Requires an identity. Returns (ok, err).
         """
         import time
         pub, prv = self.get_identity()
@@ -449,7 +450,8 @@ class MeshCoreManager:
             return (True, None)
         if self._radio is None:
             return (False, "radio not ready")
-        pkt = MeshCorePacket(make_header(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_ADVERT),
+        route = ROUTE_TYPE_FLOOD if flood else ROUTE_TYPE_DIRECT
+        pkt = MeshCorePacket(make_header(route, PAYLOAD_TYPE_ADVERT),
                              encode_path_len(0), b"", payload)
         try:
             self._remember(pkt.packet_hash())  # ignore the repeater's echo of our advert
@@ -1064,6 +1066,12 @@ class MeshCoreManager:
             self._seen_set.discard(self._seen.pop(0))
         return True
 
+    @staticmethod
+    def _hops(pkt):
+        """Repeaters a packet travelled through (a flood's path grows per hop; a direct
+        packet's path is used up on the way, so it reads as 0)."""
+        return pkt.path_hash_count() if pkt.is_route_flood() else 0
+
     def _handle_advert(self, pkt, rssi, snr, meta):
         try:
             adv = parse_advert(pkt.payload)
@@ -1074,21 +1082,33 @@ class MeshCoreManager:
         pub, _ = self.get_identity()
         if pub is not None and adv["pubkey"] == pub.hex():
             return
-        # The badge only chats with companions -- ignore repeaters/rooms/sensors entirely.
-        if adv.get("type") != ADV_TYPE_CHAT:
-            return
-        self._seq += 1
         node = self._nodes.get(adv["pubkey"], {})
+        if node and adv["timestamp"] <= node.get("timestamp", 0):
+            return      # not newer than what we have: a replay (BaseChatMesh::onAdvertRecv)
+        # Signature: enforced when verification is cheap (native crypto); with the
+        # pure-Python fallback (seconds per check) the node is kept but marked unverified.
+        if meshcore_crypto.NATIVE:
+            payload = bytes(pkt.payload)
+            signed = advert_signed_message(payload[0:32], adv["timestamp"], payload[100:])
+            if not meshcore_crypto.verify(payload[0:32], payload[36:100], signed):
+                print("MeshCore: advert with a bad signature from %s dropped" % adv["id"])
+                return
+            adv["verified"] = True
+        self._seq += 1
         new_node = not node
         node.update(adv)
+        hops = self._hops(pkt)
         node["rssi"] = rssi
         node["snr"] = snr
         node["seq"] = self._seq
+        node["hops"] = hops
+        node["route"] = "flood" if hops else "direct"
+        node["heard_ms"] = self._now_ms()
         self._nodes[adv["pubkey"]] = node
-        # cap learned companions (RAM): evict the least-recently-heard non-contact
+        # cap learned nodes (RAM): evict the least-recently-heard one
         if new_node and len(self._nodes) > MAX_NODES:
             self._evict_oldest_node()
-        # if this companion is already a contact, refresh its live signal / last-heard
+        # if this node is already a contact, refresh its live signal / last-heard
         # (contact *details* are persisted separately; live radio info stays in RAM).
         c = self._contacts.get(adv["pubkey"])
         if c is not None:
@@ -1101,8 +1121,9 @@ class MeshCoreManager:
                     adv["pubkey"][:8], c.get("name"), new_name))
                 c["name"] = new_name
                 self._save_contacts()   # persist the new name
-        print("MeshCore companion: %s id=%s %s [UNVERIFIED]" % (
-            node.get("name") or "?", node.get("id"), meta))
+        print("MeshCore %s: %s id=%s %s%s" % (
+            node.get("type_name"), node.get("name") or "?", node.get("id"), meta,
+            "" if node.get("verified") else " [UNVERIFIED]"))
         self._notify("node", node)
 
     def _evict_oldest_node(self):
@@ -1127,6 +1148,9 @@ class MeshCoreManager:
             "sender": decoded["sender"] or "?",
             "text": decoded["text"],
             "rssi": rssi,
+            "snr": pkt.snr,
+            "hops": self._hops(pkt),
+            "rx_ms": self._now_ms(),
             "incoming": True,
         }
         if self._dup_message(("ch", decoded["channel"], msg["sender"], msg["text"]),
@@ -1200,7 +1224,8 @@ class MeshCoreManager:
         contact = self._contacts.get(pub_hex, {})
         name = contact.get("name") or ("%02x" % got["src_hash"])
         msg = {"ts": got["timestamp"], "sender": name, "text": got["text"],
-               "rssi": rssi, "incoming": True}
+               "rssi": rssi, "snr": pkt.snr, "hops": self._hops(pkt),
+               "rx_ms": self._now_ms(), "incoming": True}
         # A resend must still be ACKED -- they are resending precisely because our ack was
         # lost -- but it must not show up in the chat a second time.
         dup = self._dup_message(("dm", pub_hex, got["text"]), msg["ts"])
@@ -1564,8 +1589,9 @@ class MeshCoreManager:
         return pubkey_hex in self._contacts
 
     def get_learned_companions(self):
-        """Companions heard via advert this session (RAM only). Add one -> it becomes a
-        persisted contact you can chat with."""
+        """Nodes heard via advert this session (RAM only), most recent first: companions,
+        repeaters and rooms. Adding a companion makes it a persisted contact you can chat
+        with."""
         return sorted(self._nodes.values(), key=lambda n: n.get("seq", 0), reverse=True)
 
     def add_contact(self, pubkey_hex, name=None, node_type=ADV_TYPE_CHAT):
