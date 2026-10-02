@@ -28,9 +28,5 @@ class Tab:
         """Called before the tab's widgets are deleted (stop timers here)."""
 
 
-class RadioTab(Tab):
-    title = "Radio"
-
-
 class SettingsTab(Tab):
     title = "Settings"

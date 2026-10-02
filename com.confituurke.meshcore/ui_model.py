@@ -209,6 +209,24 @@ def node_detail(n, now_ms):
             "info": info, "fields": fields}
 
 
+def radio_texts(st):
+    """Strings for the Radio tab from manager.radio_stats()."""
+    if not st.get("rx_on"):
+        sub = "RX off"
+    elif st.get("last_rx_s") is None:
+        sub = "RX on · nothing heard yet"
+    else:
+        s = st["last_rx_s"]
+        sub = "RX on · last packet %s ago" % ("%d s" % s if s < 60 else age_text(s))
+    noise = st.get("noise_dbm")
+    peak = st.get("peak_rssi_30m")
+    return {"subtitle": sub,
+            "noise": _minus("%d" % noise) if noise is not None else "—",
+            "peak": "Peak " + (_minus("%d" % peak) if peak is not None else "—"),
+            "packets": "Packets %d/h" % st.get("packets_per_h", 0),
+            "tx_air": "TX air %.1f %%" % st.get("tx_air_pct", 0.0)}
+
+
 def preset_summary(p, power):
     """(title, detail, airtime) for the Radio tab's preset card."""
     title = p.get("name") or "Custom"

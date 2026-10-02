@@ -152,6 +152,20 @@ def test_node_detail():
     _assert(("Signature", "not checked") in d2["fields"])
 
 
+def test_radio_texts():
+    ui = _ui()
+    st = {"rx_on": True, "last_rx_s": 40, "noise_dbm": -106.0, "noise_series": [-106.0],
+          "peak_rssi_30m": -74.0, "packets_per_h": 6, "tx_air_pct": 0.1}
+    t = ui.radio_texts(st)
+    _assert(t == {"subtitle": "RX on · last packet 40 s ago", "noise": "−106",
+                  "peak": "Peak −74", "packets": "Packets 6/h", "tx_air": "TX air 0.1 %"}, t)
+    t = ui.radio_texts({"rx_on": False, "last_rx_s": None, "noise_dbm": None, "noise_series": [],
+                        "peak_rssi_30m": None, "packets_per_h": 0, "tx_air_pct": 0.0})
+    _assert(t["subtitle"] == "RX off" and t["noise"] == "—" and t["peak"] == "Peak —", t)
+    _assert(ui.radio_texts(dict(st, last_rx_s=None))["subtitle"] == "RX on · nothing heard yet")
+    _assert(ui.radio_texts(dict(st, last_rx_s=7200))["subtitle"] == "RX on · last packet 2 h ago")
+
+
 def test_age_text():
     ui = _ui()
     _assert([ui.age_text(s) for s in (5, 120, 3700, 3 * 86400)] == ["now", "2 min", "1 h", "3 d"])
