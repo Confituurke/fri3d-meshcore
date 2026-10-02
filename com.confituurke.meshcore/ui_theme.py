@@ -46,9 +46,19 @@ def color(c):
     return lv.color_hex(c)
 
 
+_font_cache = {}
+
+
 def font(role):
-    name, size = _FONTS[role]
-    return FontManager.getFont(size=size, ttf="M:%s/fonts/%s" % (_DIR, name))
+    """The font for a text role. Kept per role: FontManager.getFont() is far slower than
+    creating a widget, and every label asks for a font. A font that is held stays valid
+    (FontManager never destroys fonts)."""
+    f = _font_cache.get(role)
+    if f is None:
+        name, size = _FONTS[role]
+        f = FontManager.getFont(size=size, ttf="M:%s/fonts/%s" % (_DIR, name))
+        _font_cache[role] = f
+    return f
 
 
 def style(name):

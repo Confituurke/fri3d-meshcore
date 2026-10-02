@@ -1,5 +1,5 @@
 """Type one line into MicroPythonOS's asyncio REPL, slowly enough that it keeps every
-character, and print what comes back. Needs pyserial (it ships with mpremote).
+character (60 ms apart), and print what comes back. Needs pyserial (it ships with mpremote).
 
     python3 tools/repl_type.py PORT "from mpos import AppManager; ..." [WAIT_S]
     python3 tools/repl_type.py PORT --stop
@@ -29,7 +29,7 @@ def type_line(s, line, wait):
     s.read(65536)
     for ch in line.encode():
         s.write(bytes([ch]))
-        time.sleep(0.03)
+        time.sleep(0.06)
     s.write(b"\r")
     return _read(s, wait)
 

@@ -45,6 +45,9 @@ class MeshCoreHome(Activity):
     def select(self, idx):
         if idx == self._tab_index:
             return
+        if __debug__:
+            import time
+            t0 = time.ticks_ms()
         if self._tab is not None:
             try:
                 self._tab.destroy()
@@ -56,6 +59,8 @@ class MeshCoreHome(Activity):
         self._tab.build(self.content, self)
         self.tabbar.set_active(idx)
         self.refresh_badge()
+        if __debug__:
+            print("MeshCoreHome: tab %d built in %d ms" % (idx, time.ticks_diff(time.ticks_ms(), t0)))
 
     def refresh_badge(self):
         total = 0

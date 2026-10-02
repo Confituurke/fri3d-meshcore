@@ -13,6 +13,7 @@ import ui_theme as T
 from meshcore_manager import MeshCoreManager
 
 MAX_BUBBLES = 50
+FIRST_BUBBLES = 25          # shown on opening; "Show earlier messages" loads up to MAX_BUBBLES
 BUBBLE_MAX_W = 340
 KEYBOARD_H = 188
 
@@ -92,9 +93,14 @@ class ThreadActivity(Activity):
 
     # --- building -------------------------------------------------------- #
     def onCreate(self):
+        if __debug__:
+            import time
+            t0 = time.ticks_ms()
         self.mgr = MeshCoreManager.get_instance()
         self._tz = T.tz_offset_s()
         self._bubbles = {}            # id(msg) -> _Bubble
+        self._limit = FIRST_BUBBLES
+        self._earlier = None
         scr = T.make_screen()
         scr.set_flex_flow(lv.FLEX_FLOW.COLUMN)
         self.header = T.Header(scr, self.title(), self.subtitle(), back=self.finish)
@@ -117,6 +123,9 @@ class ThreadActivity(Activity):
         self._divider = None
         self.refresh()
         self.mgr.clear_unread(self.key())
+        if __debug__:
+            print("%s: %d bubbles built in %d ms" % (type(self).__name__, len(self._bubbles),
+                                                     time.ticks_diff(time.ticks_ms(), t0)))
         self.setContentView(scr)
 
     def _build_quick_replies(self, scr):
@@ -204,8 +213,23 @@ class ThreadActivity(Activity):
         if n:
             self.list.get_child(n - 1).scroll_to_view_recursive(False)
 
-    def refresh(self):
-        msgs = self.messages()[-MAX_BUBBLES:]
+    def show_earlier(self):
+        self._limit = MAX_BUBBLES
+        self._bubbles = {}
+        self._divider = None
+        self._earlier = None
+        self.list.clean()
+        self.refresh(scroll=False)
+
+    def refresh(self, scroll=True):
+        all_msgs = self.messages()
+        msgs = all_msgs[-self._limit:]
+        if len(all_msgs) > len(msgs) and self._limit < MAX_BUBBLES and self._earlier is None:
+            row = T.box(self.list, T.W, lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
+            row.set_flex_align(lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
+            row.set_style_pad_ver(6, lv.PART.MAIN)
+            T.Chip(row, "Show earlier messages", self.show_earlier)
+            self._earlier = row
         live = set(id(m) for m in msgs)
         for k in list(self._bubbles):
             if k not in live:
@@ -222,7 +246,7 @@ class ThreadActivity(Activity):
                 added = True
             else:
                 b.update()
-        if added:
+        if added and scroll:
             self._scroll_to_end()
 
     def show_sender(self):

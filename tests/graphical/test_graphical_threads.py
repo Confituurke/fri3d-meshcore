@@ -85,5 +85,21 @@ class TestThreads(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "copy that"))
 
 
+    def test_long_thread_opens_on_the_newest_and_loads_earlier(self):
+        import meshcore_manager as mm
+        now = mm.unix_time()
+        for i in range(40):
+            self.m._add_message("Public", {"ts": now - 400 + i, "sender": "Sam",
+                                           "text": "msg %d" % i, "incoming": True})
+        act = mc_fixtures.open_thread("channel", "Public")
+        self.assertEqual(len(act._bubbles), 25)
+        self.assertIsNone(find_label_with_text(lv.screen_active(), "msg 0"))
+        self.assertTrue(click_label("Show earlier messages"))
+        wait_for_render(10)
+        self.assertEqual(len(act._bubbles), 42)            # 40 + the 2 seeded ones, under 50
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "msg 0"))
+        self.assertIsNone(find_label_with_text(lv.screen_active(), "Show earlier messages"))
+
+
 if __name__ == "__main__":
     unittest.main()
