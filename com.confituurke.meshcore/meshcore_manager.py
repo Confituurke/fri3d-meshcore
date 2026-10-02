@@ -1,10 +1,10 @@
 # MeshCoreManager -- background MeshCore node/radio owner (singleton).
 #
 # Owns the shared SX1262 and runs passively in the background, independent of any UI, so
-# the badge listens (and can send on public channels) even when no MeshCore screen is
+# the device listens (and can send on public channels) even when no MeshCore screen is
 # open.  Enabled by an app-local toggle (`service_enabled` pref): MeshCoreBootService starts
-# it at boot when enabled, and the Me-tab switch turns it on/off live.  UI activities attach
-# as a data source.
+# it at boot when enabled, and the Settings switch turns it on/off live.  UI activities
+# attach as a data source.
 #
 # Data model (all lvgl-free; UI subscribes via add_subscriber and marshals to LVGL):
 #   - nodes     : neighbors/repeaters learned from ADVERT packets (UNVERIFIED -- Ed25519
@@ -18,9 +18,9 @@
 
 try:
     simulation_mode = False
-    from machine import Pin
+    import machine  # noqa: F401  -- only to tell a device from a desktop run
 except Exception as e:
-    print("MeshCoreManager: simulation mode (no machine.Pin): %s" % e)
+    print("MeshCoreManager: simulation mode (no machine module): %s" % e)
     simulation_mode = True
 
 from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
@@ -37,7 +37,6 @@ from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_m
 import meshcore_crypto   # noqa: F401
 import meshcore_dm       # noqa: F401
 import meshcore_radio    # noqa: F401
-import meshcore_version  # noqa: F401
 
 MESHCORE_RADIO = dict(
     freq=869.618, bw=62.5, sf=8,
@@ -78,16 +77,11 @@ CH_MAX_SENDS = 3
 REINIT_BACKOFF_MS = 5000
 REINIT_BACKOFF_MAX_MS = 60000
 
-# Seeded into every fresh install alongside "Public" -- a hashtag channel, so there is no key
-# to hand out: everyone who knows the name derives the same one. Removable like any other.
-DEFAULT_CHANNEL = "fri3dcamp"
+# Optional hashtag channel seeded into a fresh install alongside "Public" (None: Public only).
+DEFAULT_CHANNEL = None
 
-MESHCORE_APP = "org.fri3d.meshcore"
+MESHCORE_APP = "com.confituurke.meshcore"
 NICKNAME_PREFS = MESHCORE_APP
-
-# Marks that the one-time "coprocessor too old -> radio service off" migration has run, so
-# it cannot fire twice and override a user who re-enables the service deliberately.
-COMPAT_AUTODISABLE_PREF = "compat_autodisabled"
 
 
 class MeshCoreManager:
@@ -104,7 +98,6 @@ class MeshCoreManager:
         self._radio = None
         self._radio_ready = False   # True only after a full, successful bring-up
         self._running = False
-        self._rf_sw = None
         # Serialises all radio SPI (RX poll + TX) across the worker and UI threads. Both
         # talk to the SX1262 over SPI bus 2 (shared with the LCD DMA); without this, a TX
         # from a UI thread could overlap the worker's RX poll and wedge the radio.
@@ -149,9 +142,8 @@ class MeshCoreManager:
         self._last_tx_ms = None                  # ticks_ms of the last transmit
         self._tx_count = 0                        # packets transmitted this session
         self._reinit_count = 0                    # radio re-inits (wedge recoveries)
-        self._ch32_reset_count = 0                # CH32 expander LoRa resets attempted
-        self._ch32_reset_fail_count = 0           # ... of which the readback did not confirm
-        self._compat_autodisabled = False         # service was force-disabled this boot
+        self._reset_count = 0                     # radio hardware resets attempted
+        self._reset_fail_count = 0                # ... of which the chip did not come back
         self._load_channels()
         self._seed_default_channels()
         self._load_contacts()
@@ -200,96 +192,11 @@ class MeshCoreManager:
             "last_tx_ms": self._ms_since(self._last_tx_ms),
             "tx_pending": len(self._tx_queue),
             "reinits": self._reinit_count,
-            "ch32_resets": self._ch32_reset_count,
-            "ch32_reset_fails": self._ch32_reset_fail_count,
+            "resets": self._reset_count,
+            "reset_fails": self._reset_fail_count,
             "nodes": len(self._nodes),
             "contacts": len(self._contacts),
         }
-
-    @staticmethod
-    def coprocessor_status():
-        """(version_tuple_or_None, supported_bool) for the CH32 coprocessor.
-
-        Only meaningful on the fri3d_2026 badge: it is the only board with this coprocessor,
-        and it is the only board whose LoRa reset line runs through it.  Anywhere else --
-        other hardware, desktop simulation -- there is nothing to check and nothing to warn
-        about, so report supported.
-
-        See meshcore_version for what the minimum is and why.
-        """
-        try:
-            from mpos import DeviceInfo
-            if DeviceInfo.hardware_id != "fri3d_2026":
-                return (None, True)
-        except Exception:
-            return (None, True)
-        try:
-            import mpos
-            exp = getattr(mpos, "io_expander", None)
-            if exp is None:
-                return (None, True)   # no expander exposed -> nothing we can or should judge
-            version = tuple(exp.version)
-        except Exception as e:
-            # An I2C read that throws is itself a bad sign, but "could not read" is not
-            # "too old" -- do not nag on evidence we do not have.
-            print("MeshCoreManager: could not read coprocessor version:", repr(e))
-            return (None, True)
-        return (version, meshcore_version.at_least(version, meshcore_version.MIN_CH32_FW))
-
-    def apply_compat_autodisable(self):
-        """Once, on a badge whose coprocessor is too old: turn the radio service off.
-
-        Someone who enabled the service on an earlier version keeps that setting across an
-        app update (AppManager.install_mpk replaces apps/<name> but never touches prefs/ --
-        only uninstall does), so without this they would go on running the radio, and its
-        CH32 reset path, on firmware that can black-screen the badge.  The boot service
-        starts headless with no UI, so a dialog cannot cover that case; the pref has to be
-        the thing that changes.
-
-        Exactly once, tracked by its own pref.  After that the toggle is the user's again:
-        re-enabling it on old firmware is an informed choice (they have seen the dialog) and
-        must not be silently undone on every launch.  The flag is only ever set on a badge
-        that is actually unsupported, so supported badges are never marked and never touched.
-
-        Returns True if the service was turned off, either now or earlier this boot.
-        """
-        if self._compat_autodisabled:
-            return True
-        try:
-            from mpos import SharedPreferences
-            prefs = SharedPreferences(NICKNAME_PREFS)
-            if prefs.get_bool(COMPAT_AUTODISABLE_PREF, False):
-                return False        # already applied once; the user's choice stands now
-        except Exception as e:
-            print("MeshCoreManager: compat autodisable pref read failed:", repr(e))
-            return False
-
-        version, supported = self.coprocessor_status()
-        if supported:
-            return False            # includes non-fri3d hardware and unreadable versions
-
-        was_enabled = self.is_service_enabled()
-        try:
-            ed = prefs.edit()
-            if was_enabled:
-                ed.put_bool("service_enabled", False)
-            ed.put_bool(COMPAT_AUTODISABLE_PREF, True)
-            ed.commit()
-        except Exception as e:
-            print("MeshCoreManager: compat autodisable write failed:", repr(e))
-            return False
-
-        if was_enabled:
-            self._compat_autodisabled = True
-            print("MeshCoreManager: radio service turned OFF -- coprocessor firmware %s is "
-                  "below %s (see MicroPythonOS#224)"
-                  % (meshcore_version.format_version(version),
-                     meshcore_version.format_version(meshcore_version.MIN_CH32_FW)))
-        return was_enabled
-
-    def was_compat_autodisabled(self):
-        """True if apply_compat_autodisable turned the service off during this badge boot."""
-        return self._compat_autodisabled
 
     # --- background-service enable toggle (app-local pref, live) ------------ #
     def is_service_enabled(self):
@@ -327,15 +234,15 @@ class MeshCoreManager:
         return self.default_nickname()
 
     def default_nickname(self):
-        """badge_<first 4 hex of the public key>, so two badges are never the same node name.
+        """MC-<first 4 hex of the public key>, so two nodes never share a default name.
 
         The public key is already the node's identity, so its first bytes are as good a
-        unique tag as any -- and 'badge_d5e4' matches the node id you see on the air (the
+        unique tag as any -- and 'MC-D5E4' matches the node id you see on the air (the
         first byte of that same key)."""
         pub, _ = self.get_identity()
         if pub is None:
-            return "badge"
-        return "badge_%s" % pub.hex()[:4]
+            return "MC"
+        return "MC-%s" % pub.hex()[:4].upper()
 
     def set_nickname(self, name):
         name = (name or "").strip()
@@ -401,15 +308,15 @@ class MeshCoreManager:
         return pub
 
     def _name_from_identity(self, pub):
-        """Give an unnamed node a name derived from its brand-new key (badge_d5e4)."""
+        """Give an unnamed node a name derived from its brand-new key (MC-D5E4)."""
         try:
             from mpos import SharedPreferences
             current = SharedPreferences(NICKNAME_PREFS).get_string("nickname", "")
         except Exception:
             current = ""
-        if current and current != "badge":      # the user picked a name -- leave it alone
+        if current and current != "MC":         # the user picked a name -- leave it alone
             return
-        name = "badge_%s" % pub.hex()[:4]
+        name = "MC-%s" % pub.hex()[:4].upper()
         if self.set_nickname(name):
             print("MeshCore: node named %s" % name)
             self._notify("nickname", name)
@@ -540,7 +447,7 @@ class MeshCoreManager:
                 print("MeshCore: skipping bad saved channel %r: %s" % (entry, e))
 
     def _seed_default_channels(self):
-        """First run: join #fri3dcamp, so every badge is on the camp channel out of the box.
+        """First run: join DEFAULT_CHANNEL (when set) next to Public.
 
         Guarded by a flag rather than "is it missing?", so that deleting it makes it stay
         deleted instead of coming back on the next boot."""
@@ -552,7 +459,7 @@ class MeshCoreManager:
         except Exception as e:
             print("MeshCore: seed check error:", repr(e))
             return
-        if self.get_channel("#" + DEFAULT_CHANNEL) is None:
+        if DEFAULT_CHANNEL and self.get_channel("#" + DEFAULT_CHANNEL) is None:
             ch = Channel.from_hashtag_name(DEFAULT_CHANNEL)
             self._channels.append(ch)
             self._messages.setdefault(ch.name, [])
@@ -647,89 +554,27 @@ class MeshCoreManager:
             self._bringup_in_progress = False
             print("MeshCoreManager: could not start radio init:", repr(e))
 
-    def _reset_lora_via_ch32(self):
-        """Hardware-reset the SX1262 via the CH32 expander (config reg 0x16): hold LoRa in
-        reset then release, keeping LCD/aux powered.  The driver's own reset() toggles a
-        dummy GPIO, so this is the only way to get a guaranteed-clean radio.
-
-        Two consecutive writes to this register is a pattern the CH32 mishandles, in two
-        distinct ways (MicroPythonOS#224):
-
-          * If an LVGL expander read (buttons/joystick, 20-60Hz) lands between the two
-            writes, the second is silently dropped ~4% of the time -- leaving the radio
-            stuck in reset.  Pausing LVGL's timer handler removes the interleaved read.
-          * If the two writes land too close together in time, coprocessor firmware v2.0.1
-            can crash outright: black screen, ENODEV on all further I2C, hard power-cycle
-            to recover.  Fixed in coprocessor firmware v2.0.2; wide spacing mitigates it.
-
-        So: pause the task handler, and space the writes generously.  Measured upstream at
-        0/150 failed toggles with this shape versus 6/150 without.  Returns True when the
-        release was verified by reading the config register back.
-
-        The 200ms *before* the first write is not padding: disable() only stops the handler
-        being scheduled again, it does not interrupt a run already in flight on the main
-        thread (we are on the worker thread here), so the sleep is what lets an in-progress
-        expander read finish before we start writing.  The cost is a ~600ms UI freeze per
-        recovery, which is the right trade against a black screen.
-        """
-        # Post-MicroPythonOS#231 the framework owns this; inherit it rather than racing it.
+    def _reset_radio(self):
+        """Hardware-reset the SX1262 through the framework (the board supplies the reset
+        line via LoRaManager.board_reset). Returns True when the chip answered afterwards."""
+        ok = False
         try:
             from mpos import LoRaManager
-            fn = getattr(LoRaManager, "reset_chip", None)
-            if fn is not None:
-                return self._log_ch32_reset(bool(fn()), "LoRaManager.reset_chip")
+            ok = bool(LoRaManager.reset_chip())
         except Exception as e:
-            print("MeshCoreManager: LoRaManager.reset_chip failed, falling back:", repr(e))
-
-        task_handler = None
-        try:
-            import time
-            import mpos
-            exp = getattr(mpos, "io_expander", None)
-            if exp is None:
-                return False    # no expander (other board / simulation): nothing to reset
-            task_handler = getattr(getattr(mpos, "ui", None), "task_handler", None)
-            if task_handler is not None:
-                task_handler.disable()
-            time.sleep_ms(200)
-            exp.config = 0x03   # LoRa held in reset, LCD on, aux on
-            time.sleep_ms(200)
-            exp.config = 0x13   # LoRa released, LCD on, aux on
-            time.sleep_ms(200)
-            # config reads back as (lora_reset, remap, reboot, lcd_reset, aux_power);
-            # lora_reset high means the chip is out of reset, i.e. 0x13 landed.
-            return self._log_ch32_reset(bool(exp.config[0]), "CH32 expander")
-        except Exception as e:
-            print("MeshCoreManager: CH32 LoRa reset error:", repr(e))
-            return self._log_ch32_reset(False, "CH32 expander (threw)")
-        finally:
-            if task_handler is not None:
-                try:
-                    task_handler.enable()
-                except Exception as e:
-                    print("MeshCoreManager: task_handler.enable failed:", repr(e))
-
-    def _log_ch32_reset(self, ok, via):
-        """Count and log one CH32 reset; returns `ok` so callers can `return` this directly.
-
-        Counting lives here, in the single place every reset path ends up, so a fallback
-        after LoRaManager.reset_chip throws cannot double-count the same attempt.  The line
-        carries a timestamp and the running counts because fri3d-meshcore#7 wants reset
-        frequency compared across OS versions, and a serial capture is the only way to get
-        that number off a badge."""
-        self._ch32_reset_count += 1
+            print("MeshCoreManager: LoRaManager.reset_chip failed:", repr(e))
+        self._reset_count += 1
         if not ok:
-            self._ch32_reset_fail_count += 1
-        print("MeshCoreManager: CH32 LoRa reset %s via %s (t=%d, resets=%d, failed=%d)"
-              % ("ok" if ok else "NOT VERIFIED", via, self._now_ms(),
-                 self._ch32_reset_count, self._ch32_reset_fail_count))
+            self._reset_fail_count += 1
+        print("MeshCoreManager: radio reset %s (t=%d, resets=%d, failed=%d)"
+              % ("ok" if ok else "NOT VERIFIED", self._now_ms(),
+                 self._reset_count, self._reset_fail_count))
         return ok
 
     def _bring_up_radio(self):
         """Reset + configure the radio for continuous RX. Returns True on success."""
         import time
-        from mpos import LoRaManager, DeviceInfo
-        fri3d = DeviceInfo.hardware_id == "fri3d_2026"
+        from mpos import LoRaManager
         # Not ready until setBlockingCallback below succeeds. Assigning self._radio during
         # begin() is not enough: if begin() throws on a wedged radio, the chip never gets
         # setBlockingCallback and send() then fails with "'SX1262' has no attribute
@@ -738,23 +583,17 @@ class MeshCoreManager:
         state = None
         # Claim the shared SX1262 before touching it. On an OS that arbitrates the radio
         # (MicroPythonOS#229) this is what stops us and lora_chat from driving the same chip
-        # at once; on 0.17.x nothing arbitrates and it always succeeds. Bail out *before*
-        # the CH32 reset -- resetting a radio another app is mid-transaction on is exactly
-        # the collision the lock exists to prevent.
+        # at once. Bail out *before* the reset -- resetting a radio another app is
+        # mid-transaction on is exactly the collision the lock exists to prevent.
         if not meshcore_radio.lock_acquire("meshcore"):
             print("MeshCoreManager: LoRa held by %s, not starting radio"
                   % (meshcore_radio.lock_holder(),))
             return False
-        # One CH32 reset per bring-up, not one per attempt. Every reset is two consecutive
-        # writes to the coprocessor's config register, which is the pattern that can crash
-        # it (see _reset_lora_via_ch32) -- so a failed begin() gets a second begin(), not a
-        # second reset. Only a bring-up that still fails after that resets again, and
-        # _attempt_reinit's backoff keeps those far apart.
-        self._reset_lora_via_ch32()
+        # One reset per bring-up, not one per attempt: a failed begin() gets a second
+        # begin(), and only a bring-up that still fails resets again, with _attempt_reinit's
+        # backoff keeping those far apart.
+        self._reset_radio()
         for attempt in (1, 2):
-            if fri3d:
-                self._rf_sw = Pin(46, Pin.OUT)
-                self._rf_sw.value(1); print("RF_SW set to HIGH")
             # adapt(): the board decides which driver class radioChip is, and the upstream
             # one (MicroPythonOS#229) renames every method. Returns it untouched on the
             # driver 0.17.x ships, so this costs nothing today.
@@ -772,9 +611,6 @@ class MeshCoreManager:
             # thread and got starved by another app's LVGL/LCD-DMA when backgrounded, which
             # dropped packets. The worker thread runs regardless of the foreground app.
             self._radio.setBlockingCallback(False, None)
-            if fri3d:
-                self._radio.setDio2AsRfSwitch(False)
-                self._rf_sw.value(1); print("RF_SW set to HIGH")
             self._radio_ready = True
             print("MeshCoreManager: passive receive started, worker-polled (begin state=%s)" % state)
             return True
@@ -805,7 +641,7 @@ class MeshCoreManager:
         self._spawn_secret_precompute()
 
     def restart(self):
-        """Recover a wedged radio: stop, reset via CH32, and re-init (from the UI)."""
+        """Recover a wedged radio: stop, reset, and re-init (from the UI)."""
         print("MeshCoreManager: restart requested")
         self._running = False
         self._radio_ready = False    # block TX/RX until bring-up re-completes
@@ -987,18 +823,14 @@ class MeshCoreManager:
             self._attempt_reinit(now)
 
     def _attempt_reinit(self, now):
-        """Recover a wedged radio via a full re-init (CH32 reset + begin + setBlockingCallback).
+        """Recover a wedged radio via a full re-init (reset + begin + setBlockingCallback).
 
-        Rate-limited so a radio that's momentarily un-recoverable (e.g. the LCD is mid
-        app-switch and hammering the shared SPI bus) doesn't thrash the CH32/SPI or flood the
-        serial -- but it keeps retrying, so it self-heals as soon as the bus goes quiet.
+        Rate-limited so a radio that's momentarily un-recoverable doesn't thrash the reset
+        line and SPI or flood the serial -- but it keeps retrying, so it self-heals.
 
         The delay doubles on each consecutive failure (5s -> 60s cap) and resets as soon as
-        the watchdog sees RX again.  A flat 5s meant a radio that could not be recovered at
-        all -- a dead module, or a coprocessor already wedged -- kept writing the CH32 config
-        register every 5s forever, which is exactly the traffic that firmware v2.0.1 crashes
-        on.  Backing off turns an unrecoverable radio into a quiet one instead of a badge
-        that black-screens itself."""
+        the watchdog sees RX again, which turns an unrecoverable radio (a dead module) into
+        a quiet one instead of one that is reset every 5s forever."""
         import time
         if time.ticks_diff(now, self._last_reinit_ms) < self._reinit_backoff_ms:
             return
@@ -1910,10 +1742,6 @@ class MeshCoreManager:
         ok = False
         self._radio_lock.acquire()
         try:
-            # RF switch: GPIO46 HIGH = RX path, LOW = TX path. Route the antenna to the
-            # PA for the duration of the transmit, or nothing radiates.
-            if self._rf_sw is not None:
-                self._rf_sw.value(0)
             _, result = self._radio.send(raw)   # non-blocking: returns immediately
             print("MeshCoreManager: TX result %s"
                   % meshcore_radio.status_name(self._radio, result))
@@ -1930,9 +1758,7 @@ class MeshCoreManager:
         except Exception as e:
             print("MeshCoreManager: TX exception:", repr(e))
         finally:
-            # Antenna back to the RX path, clear any latched IRQ, then re-arm receive.
-            if self._rf_sw is not None:
-                self._rf_sw.value(1)
+            # Clear any latched IRQ, then re-arm receive.
             try:
                 self._radio.clearIrqStatus()
             except Exception:

@@ -1,169 +1,90 @@
-# MeshCore for MicroPythonOS
+# MeshCore for MicroPythonOS — SenseCAP Indicator
 
-A [MeshCore](https://meshcore.io/) LoRa mesh client for the Fri3d Camp 2026 badge
-(ESP32-S3 + Seeed Wio-SX1262), packaged as a [MicroPythonOS](https://micropythonos.com) app and
-published on [BadgeHub](https://badgehub.eu) as the **`org.fri3d.meshcore`** project.
+A [MeshCore](https://meshcore.io/) LoRa messenger for [MicroPythonOS](https://micropythonos.com)
+devices with a built-in SX1262 radio, aimed at the Seeed SenseCAP Indicator D1L (ESP32-S3,
+480×480 touch). The app id is **`com.confituurke.meshcore`**. It is based on
+[fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
 
-- **Companions & contacts** — learns companion nodes from adverts; add one as a contact to chat.
-- **Public `#` channels** — send/receive group messages, interoperable with the MeshCore apps.
-- **Encrypted direct messages** — 1:1 messages (X25519 + AES-128 + HMAC) with delivery acks.
-- **Identity** — Ed25519 keypair (pure-Python, on-device), signed adverts, contact QR to share.
-- **Background radio service** — an on/off toggle in the Me tab runs the node in the background
-  (receive when the app is closed) and self-heals the radio; off = radio idle.
+- **Channels:** Public plus `#hashtag` and private channels. Messages are sent and received
+  interoperably with the MeshCore apps.
+- **Direct messages:** 1:1 messages (X25519 + AES-128 + HMAC) with delivery acknowledgements.
+- **Identity:** an on-device Ed25519 keypair and signed adverts.
+- **Background radio service:** a toggle that keeps the node receiving while the app is closed.
+  It recovers the radio automatically.
 
-Wire-compatible with real MeshCore nodes. Protocol logic is pure-Python and unit-tested off-badge.
+Protocol logic is pure Python and unit-tested on the desktop.
 
 ## Requirements
 
-**Badge coprocessor (CH32) firmware 2.0.2 or newer**, which in practice means
-**MicroPythonOS 0.17.0 or newer** — the first release that ships a fixed coprocessor (2.0.3).
+**MicroPythonOS with a board that publishes its radio** as `LoRaManager.radioChip` (the polled
+SX126x driver). The board must also provide a reset hook (`LoRaManager.board_reset`).
 
-The SX1262's reset line is wired only to the CH32 coprocessor, not to the ESP32-S3, so the only
-way to hardware-reset a wedged radio is to write the CH32's config register twice — assert reset,
-then release it. Two consecutive I2C register writes is exactly the pattern that crashes CH32
-firmware 2.0.1: the badge black-screens, all further I2C returns `ENODEV`, and only a power-cycle
-recovers it ([MicroPythonOS#224](https://github.com/MicroPythonOS/MicroPythonOS/issues/224)). Since
-this app resets the radio on its recovery path, a badge that keeps losing the radio could
-black-screen itself. Fixed in badge firmware
-[v2.0.2](https://github.com/Fri3dCamp/badge_2026_fw/releases/tag/v2.0.2). MicroPythonOS installs
-whichever coprocessor firmware it carries automatically at boot: 0.16.1 carries the broken 2.0.1,
-and 0.17.0 is the first release carrying a fixed one (2.0.3).
-
-**If OSUpdate says your badge is up to date on 0.16.1**, it is checking a stale mirror rather than
-telling you the truth. OSUpdate on 0.16.1 only ever queries `updates.micropythonos.com`, whose
-manifest still advertises 0.16.1; the alternate `updates.micropythonos.org` mirror is the one
-serving 0.17.0, and it is only consulted by 0.17.0 and later — which you cannot reach from 0.16.1.
-Until that is fixed upstream, update by flashing
-`https://updates.micropythonos.org/releases/esp32s3/MicroPythonOS_esp32s3_0.17.0.ota`, or install a
-[release build](https://github.com/MicroPythonOS/MicroPythonOS/releases) over USB.
-
-MeshCore checks `mpos.io_expander.version` at launch and shows a notice you have to acknowledge if
-the coprocessor is older — there is no manifest field for a minimum firmware version yet
-([MicroPythonOS#223](https://github.com/MicroPythonOS/MicroPythonOS/issues/223)), so the check has
-to happen at runtime. The app still runs on older firmware: the reset path is widely spaced,
-pauses LVGL's I2C traffic, and backs off exponentially when recovery keeps failing, which makes a
-crash unlikely — but the defect is in firmware and cannot be fixed from the app.
-
-**Upgrading with the radio service already on:** app updates keep your settings (only uninstalling
-clears them), so the first time this version runs on a badge with old coprocessor firmware it turns
-the background radio service **off** once, and says so. That happens at boot as well as on launch,
-since the boot service starts the radio headless with no UI to warn through. It is a one-time
-migration: turn the service back on from the Me tab and it stays on, on the assumption you have
-read the warning. Updating the OS is the real fix.
-
-Your coprocessor version is shown on the **Me** tab, and from the REPL:
-```python
-import mpos; print(mpos.io_expander.version)   # want (2, 0, 2) or newer
-```
+**The native `meshcrypto` module is recommended.** It makes signing and verification take
+milliseconds; without it the app falls back to pure-Python Ed25519/X25519, which takes seconds
+per operation on the device.
 
 ## Layout
 
 ```
-org.fri3d.meshcore/          # the app payload — exactly what ships in the .mpk
+com.confituurke.meshcore/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
-  icon_64x64.png            # the app icon (also what BadgeHub shows)
-  meshcore.py               # UI (activities)
-  meshcore_manager.py       # radio owner + background service (singleton)
-  meshcore_packet.py        # packet parse/serialize
-  meshcore_channel.py       # group-channel codec (AES-128 + HMAC)
-  meshcore_crypto.py        # Ed25519 / X25519 (pure-Python)
-  meshcore_advert.py        # advert parse/build + share URIs
-  meshcore_dm.py            # direct-message + ack codec
-  meshcore_version.py       # minimum badge firmware + version comparison
-  meshcore_boot_service.py  # boot_completed service (starts the radio if enabled)
-  fonts/                    # Archivo Narrow (OFL), the chat font — see below
-tests/                      # off-badge unit tests (desktop CPython)
-build_mpk.py                # build the .mpk locally (no external deps)
-.github/workflows/release.yml   # tag vX.Y.Z -> build + publish (via the marketplace actions)
+  icon_64x64.png
+  meshcore.py                # UI (activities)
+  meshcore_manager.py        # radio owner + background service (singleton)
+  meshcore_packet.py         # packet parse/serialize
+  meshcore_channel.py        # group-channel codec (AES-128 + HMAC)
+  meshcore_crypto.py         # Ed25519 / X25519
+  meshcore_advert.py         # advert parse/build + share URIs
+  meshcore_dm.py             # direct-message + ack codec
+  meshcore_radio.py          # driver adapter + radio lock helpers
+  meshcore_boot_service.py   # boot_completed service (starts the radio if enabled)
+  fonts/                     # Archivo Narrow (OFL)
+tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
+tools/check_app.py           # bundle checks (compiles, manifest, icon)
+build_mpk.py                 # build the .mpk locally (no external deps)
 ```
 
-## Install
+## Install for development
 
-**On the badge:** open the **AppStore** app and install **MeshCore**. After launching, enable
-**Me → Radio service** (off by default). Only one LoRa app can use the SX1262 at a time — turn
-this off before opening the LoRa Chat app.
+```
+mpremote connect /dev/ttyUSB0 fs cp -r com.confituurke.meshcore :/apps/
+```
 
-**From source (development):**
-```
-mpremote connect /dev/ttyACM0 fs cp -r org.fri3d.meshcore :/apps/
-```
-then power-cycle.
+Then restart the device, or call `AppManager.refresh_apps()`.
 
 ## Develop
 
-Run the off-badge tests (pure CPython, the app dir goes on `PYTHONPATH`):
-```
-for t in tests/test_*.py; do PYTHONPATH=org.fri3d.meshcore python3 "$t"; done
-python3 tools/check_app.py org.fri3d.meshcore --slug org.fri3d.meshcore
-```
-
-Both run in CI on every push (`.github/workflows/ci.yml`), and the release is gated on them.
-`check_app.py` covers what the tests cannot: `meshcore.py`, `meshcore_manager.py` and
-`meshcore_boot_service.py` import `lvgl`/`mpos`, so nothing off-badge can import them -- it
-compiles them, and checks the manifest's entrypoints/classnames, the icon, and that the
-fullname matches the folder (and the BadgeHub slug).
-
-Build the package locally:
-```
-python3 build_mpk.py          # -> org.fri3d.meshcore_<version>.mpk
-```
-
-## Release
-
-Releases are automated and **the git tag is the version** -- no files to edit. Pushing a
-`vX.Y.Z` tag runs `.github/workflows/release.yml`, which stamps `X.Y.Z` into `MANIFEST.JSON`,
-builds the `.mpk` with [`tjorim/mpos-package-mpk`](https://github.com/tjorim/mpos-package-mpk)
-and publishes it with
-[`tjorim/mpos-badgehub-publish`](https://github.com/tjorim/mpos-badgehub-publish).
+Run the desktop tests (the app directory goes on `PYTHONPATH`):
 
 ```
-git tag v0.4.5
-git push origin v0.4.5
+for t in tests/test_*.py; do PYTHONPATH=com.confituurke.meshcore python3 "$t"; done
+python3 tools/check_app.py com.confituurke.meshcore --slug com.confituurke.meshcore
 ```
 
-Use a **new** version each time (BadgeHub can't republish an existing one).
+Both run in CI on every push (`.github/workflows/ci.yml`).
 
-`MANIFEST.JSON` is the **single source** for `name`, `short_description`, `long_description`,
-`publisher` and `version` -- the publish action reads them from there. Only BadgeHub-specific
-fields (categories, badges, license, git URL, icon) are workflow inputs.
+To build the package:
 
-Two things that are easy to get wrong and fail silently:
-
-- **The BadgeHub slug must equal the app fullname** (`org.fri3d.meshcore`). The AppStore takes
-  the app's fullname *from the slug*, installs into `apps/<slug>`, and its unzipper rejects a
-  `.mpk` whose single top-level folder is anything else.
-- **The `.mpk` must be uploaded.** BadgeHub does not bundle one for you: the AppStore scans the
-  project's files for one with a `.mpk`/`.zip` extension and downloads *that*. Publishing only
-  the loose sources gives users "Download failed".
-
-The `BADGEHUB_API_TOKEN` repo secret must be a token for **this** project; mint one with
-`POST https://badgehub.eu/api/v3/projects/org.fri3d.meshcore/token` while logged in to
-badgehub.eu.
-
-Build the package locally (for sideloading):
 ```
-python3 build_mpk.py          # -> org.fri3d.meshcore_<version>.mpk
+python3 build_mpk.py          # -> com.confituurke.meshcore_<version>.mpk
 ```
 
 ## License & credits
 
-MIT — © 2025 lucid-void. See [LICENSE](LICENSE).
+MIT — © 2025 lucid-void and contributors. See [LICENSE](LICENSE).
 
-Adapts / interoperates with these MIT-licensed works (full notices in
+Adapts, or interoperates with, these MIT-licensed works (full notices in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)):
 
-- **[python-pure25519](https://github.com/warner/python-pure25519)** © Brian Warner — Ed25519 math.
-- **[meshcore-pi](https://github.com/brianwiddas/meshcore-pi)** © Brian Widdas — X25519 + identity crypto, reference impl.
-- **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell — protocol / wire-format
-  reference, and the wordmark the app icon is derived from (see FAQ 7.4).
+- **[python-pure25519](https://github.com/warner/python-pure25519)** © Brian Warner: Ed25519 math.
+- **[meshcore-pi](https://github.com/brianwiddas/meshcore-pi)** © Brian Widdas: X25519 and identity
+  crypto, used as the reference implementation.
+- **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell: the protocol and wire-format
+  reference, and the wordmark the app icon is derived from.
 
 The chat font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
-Archivo Narrow Project Authors, used under the **SIL Open Font License 1.1** — not MIT (the
-licence ships with the font at `org.fri3d.meshcore/fonts/OFL.txt`, as the OFL requires). It is
-the upstream Regular, subset to Latin-1 so it costs 17 KB of badge flash instead of 91 KB, and
-it fits ~57 characters on a chat line where LVGL's built-in Montserrat fits 42.
+Archivo Narrow Project Authors. It is used under the **SIL Open Font License 1.1** (licence at
+`com.confituurke.meshcore/fonts/OFL.txt`).
 
 MESHCORE is a trademark of its owner. This is an independent, community-built client; it is not
 affiliated with or endorsed by the MeshCore project.
-
-The AES-128 fallback and all protocol codecs are original pure-Python implementations.

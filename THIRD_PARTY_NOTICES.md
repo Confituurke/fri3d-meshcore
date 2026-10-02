@@ -10,7 +10,7 @@ Copyright (c) 2015 Brian Warner and contributors
 https://github.com/warner/python-pure25519
 
 Ed25519 field/point arithmetic and EdDSA sign/verify are vendored and adapted (made
-pure-Python and MicroPython-compatible) in `org.fri3d.meshcore/meshcore_crypto.py`.
+pure-Python and MicroPython-compatible) in `com.confituurke.meshcore/meshcore_crypto.py`.
 
 ## meshcore-pi
 Copyright (c) 2025 Brian Widdas
@@ -29,7 +29,7 @@ Used as the protocol / wire-format reference (packet header, group-channel and d
 crypto, advert layout, and the PATH/ACK acknowledgement format). No source code is copied; the
 interoperable wire format is re-implemented in pure Python from the specification and source.
 
-**The app icon** (`org.fri3d.meshcore/icon_64x64.png`) is derived from the official MeshCore
+**The app icon** (`com.confituurke.meshcore/icon_64x64.png`) is derived from the official MeshCore
 wordmark, which ships in that MIT-licensed repository at `logo/meshcore.svg` and which the
 MeshCore FAQ (7.4) makes available for use. The letterforms are the original ones, sliced
 between the "H" and the "C" and stacked to fit a square icon; nothing was redrawn or
@@ -42,9 +42,9 @@ https://github.com/Omnibus-Type/ArchivoNarrow
 
 Licensed under the SIL Open Font License, Version 1.1 -- **not** the MIT License that covers
 the rest of this app. The full text ships with the font at
-`org.fri3d.meshcore/fonts/OFL.txt`, as the OFL requires.
+`com.confituurke.meshcore/fonts/OFL.txt`, as the OFL requires.
 
-`org.fri3d.meshcore/fonts/ArchivoNarrow-Regular.ttf` is the upstream Regular (v3.002),
+`com.confituurke.meshcore/fonts/ArchivoNarrow-Regular.ttf` is the upstream Regular (v3.002),
 subset to Latin-1 plus common punctuation so it costs 17 KB instead of 91 KB on badge flash.
 The OFL permits this: the font carries no Reserved Font Name, so the modified copy may keep
 the family name. It is bundled and rendered, never sold on its own.

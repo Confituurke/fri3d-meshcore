@@ -3,7 +3,7 @@
 Hardware-independent and unit-testable off-badge -- deliberately free of `mpos`, `lvgl` and
 `drivers` imports at module level, so the translation logic can be exercised in desktop
 CPython against fake chip objects (the modules that actually talk to the radio cannot be
-imported off-badge at all).  Same rationale as meshcore_version.
+imported off-badge at all).
 
 Why this exists:
 
@@ -175,10 +175,8 @@ class _PolledAdapter:
             self._chip.set_callback(callback)
 
     def setDio2AsRfSwitch(self, enable):
-        """No-op: upstream fixes this at construction (`dio2_rf_sw=False` on fri3d_2026,
-        which drives the RF switch from GPIO46 instead).  The board already passes that, so
-        there is nothing to do here -- but the call has to succeed, since bring-up makes it
-        unconditionally.
+        """No-op: the board fixes this at construction (`dio2_rf_sw`), and LoRaManager re-arms
+        it after a hardware reset, so there is nothing to do here.
         """
         return None
 

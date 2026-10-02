@@ -4,7 +4,7 @@
 # action "boot_completed").  It starts the MeshCore radio manager only if the app-local
 # "background radio service" toggle is enabled -- this is what makes the node listen
 # passively in the background without the UI being opened.  The toggle is set live from the
-# Me tab (and persists), so no reboot is needed to enable/disable; this just honours the
+# Settings tab (and persists), so no reboot is needed to enable/disable; this just honours the
 # last state at boot. If the toggle is off, the service exits and leaves the radio alone.
 
 from mpos import Service
@@ -18,13 +18,6 @@ class MeshCoreBootService(Service):
 
     def onStart(self, intent):
         m = MeshCoreManager.get_instance()
-        # Run the one-time "coprocessor too old" migration here as well as in the app: a
-        # badge that reboots before MeshCore is next opened would otherwise start the radio
-        # -- and its CH32 reset path -- on firmware that can black-screen it, with no UI in
-        # a service to warn anyone. Whichever runs first does the flip; the other sees the
-        # pref already set and does nothing.
-        if m.apply_compat_autodisable():
-            print("MeshCoreBootService: radio service disabled -- badge firmware too old")
         if m.is_service_enabled():
             print("MeshCoreBootService: service enabled, starting background MeshCore receiver")
             m.start()

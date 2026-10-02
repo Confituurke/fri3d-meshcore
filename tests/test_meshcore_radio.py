@@ -1,6 +1,6 @@
 """Desktop CPython tests for meshcore_radio.
 
-Run:  PYTHONPATH=org.fri3d.meshcore python3 tests/test_meshcore_radio.py
+Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_radio.py
 
 The point of these is that the upstream-driver path (MicroPythonOS#229) cannot be exercised
 on a badge until MicroPythonOS actually ships it, and by then a mistranslated method name or

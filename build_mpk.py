@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Build the MeshCore .mpk package for BadgeHub / MicroPythonOS.
 
-An .mpk is a ZIP whose single top-level folder is the app fullname. The org.fri3d.meshcore/
+An .mpk is a ZIP whose single top-level folder is the app fullname. The com.confituurke.meshcore/
 folder holds only shippable files (tests live in ../tests, not here), so this just packages
 it, skipping any stray bytecode.
 
 Deterministic (matches the intent of the docs' `zip -X -r -0` recipe): entries sorted with
 the top-level folder first, STORED/uncompressed, fixed timestamps, no platform extras.
 
-    python3 build_mpk.py    ->  org.fri3d.meshcore_<version>.mpk
+    python3 build_mpk.py    ->  com.confituurke.meshcore_<version>.mpk
 """
 import json
 import os
 import zipfile
 
-APP = "org.fri3d.meshcore"
+APP = "com.confituurke.meshcore"
 ROOT = os.path.dirname(os.path.abspath(__file__))
 APPDIR = os.path.join(ROOT, APP)
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)   # zip epoch -> reproducible builds
