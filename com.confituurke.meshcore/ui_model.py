@@ -119,6 +119,10 @@ def chat_rows(mgr, now_s, filt="all", tz_s=0):
 
 def delivery(msg):
     """(glyph, text, colour) for an outgoing message's status line."""
+    if msg.get("failed"):
+        return ("✗", "no ack after 4 tries · tap to resend", ERR)
+    if msg.get("unheard") and not msg.get("heard"):
+        return ("?", "not heard by a repeater · tap to resend", WARN)
     if not msg.get("tx"):
         return ("⏳", "sending", MUTED)
     if "ack" in msg or "delivered" in msg:          # a direct message
@@ -157,6 +161,12 @@ def age_text(seconds):
     return "%d d" % (seconds // 86400)
 
 
+def _ticks_age_s(now_ms, then_ms):
+    """Seconds between two ticks_ms() values, across the 2**30 ms wrap."""
+    half = 1 << 29
+    return max(0, ((now_ms - then_ms + half) % (1 << 30) - half) // 1000)
+
+
 def _age_color(seconds):
     if seconds < 30 * 60:
         return OK
@@ -171,7 +181,7 @@ def node_rows(nodes, now_ms, filt="all", contacts=()):
     rows = []
     for n in nodes:
         kind = _KINDS.get(n.get("type"), "other")
-        age_s = max(0, (now_ms - n.get("heard_ms", now_ms)) // 1000)
+        age_s = _ticks_age_s(now_ms, n.get("heard_ms", now_ms))
         if filt == "new":
             if age_s >= 3600 or n.get("pubkey") in contacts:
                 continue
@@ -198,7 +208,7 @@ def node_detail(n, now_ms):
     info = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
     if n.get("snr") is not None:
         info += " · SNR %s dB" % snr_text(n["snr"])
-    age = age_text(max(0, (now_ms - n.get("heard_ms", now_ms)) // 1000))
+    age = age_text(_ticks_age_s(now_ms, n.get("heard_ms", now_ms)))
     info += " · heard now" if age == "now" else " · heard %s ago" % age
     fields = [("Type", _KIND_WORDS.get(kind, kind)), ("Public key", pk.lower())]
     if n.get("lat") is not None and n.get("lon") is not None:

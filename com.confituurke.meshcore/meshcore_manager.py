@@ -59,6 +59,29 @@ def unix_time():
     return t
 
 
+# MicroPython's ticks_ms() wraps every 2**30 ms (~12.4 days): compare ticks only through
+# these, never with plain subtraction.
+_TICKS_PERIOD = 1 << 30
+_TICKS_HALF = _TICKS_PERIOD // 2
+
+
+def tdiff(a, b):
+    """a - b in ms, for two ticks_ms() values less than ~6 days apart."""
+    return ((a - b + _TICKS_HALF) % _TICKS_PERIOD) - _TICKS_HALF
+
+
+def tadd(a, delta):
+    return (a + delta) % _TICKS_PERIOD
+
+
+# SX126x IRQ bits that mean "a packet is arriving" (PreambleDetected, HeaderValid).
+IRQ_BUSY = 0x04 | 0x10
+
+# A clock reading before this has never been set (no Wi-Fi/NTP yet).
+CLOCK_VALID_AFTER = 1704067200     # 2024-01-01
+IDENTITY_FILE = "identity.json"    # {"pub": hex, "prv": hex}: written once, kept apart
+
+
 class _DummyLock:
     """No-op lock for desktop simulation / ports without _thread."""
     def acquire(self, *a):
@@ -134,6 +157,13 @@ class MeshCoreManager:
             self._radio_lock = _thread.allocate_lock()
         except Exception:
             self._radio_lock = _DummyLock()
+        # Serialises prefs writes: the worker (contacts, history) and the UI (name, channels)
+        # both rewrite these JSON files, and SharedPreferences rewrites a whole file per commit.
+        try:
+            import _thread
+            self._prefs_lock = _thread.allocate_lock()
+        except Exception:
+            self._prefs_lock = _DummyLock()
         self._subscribers = []
         self._sim_started = False
         self._rx_queue = []                      # (raw, rssi, snr) awaiting processing
@@ -170,6 +200,8 @@ class MeshCoreManager:
         self._last_flush_ms = None
         self._unread = {}                        # channel name / contact pubkey_hex -> unread count
         self._mentions = set()                   # keys whose unread messages mention us
+        self._newest_heard_ts = 0                # clock fallback, see _timestamp()
+        self._busy_since = None                  # ticks when a packet started arriving
         # --- radio statistics (Radio tab) ---
         self._noise = []                         # noise-floor samples (dBm), oldest first
         self._last_noise_ms = None
@@ -245,8 +277,7 @@ class MeshCoreManager:
     # --- radio statistics --------------------------------------------------- #
     def _log_stat(self, log, entry):
         log.append(entry)
-        cutoff = entry[0] - STATS_WINDOW_MS
-        while log and log[0][0] - cutoff < 0:
+        while log and tdiff(entry[0], log[0][0]) > STATS_WINDOW_MS:
             log.pop(0)
         if len(log) > 1000:
             del log[0]
@@ -257,7 +288,7 @@ class MeshCoreManager:
         if simulation_mode or not self._radio_ready or self._radio is None:
             return
         now = self._now_ms()
-        if self._last_noise_ms is not None and now - self._last_noise_ms < NOISE_EVERY_MS:
+        if self._last_noise_ms is not None and tdiff(now, self._last_noise_ms) < NOISE_EVERY_MS:
             return
         reader = getattr(self._radio, "getRssiInst", None)
         if reader is None or not self._radio_lock.acquire(0):
@@ -279,19 +310,18 @@ class MeshCoreManager:
     def radio_stats(self):
         """Figures for the Radio tab; reads only what the worker recorded (no SPI)."""
         now = self._now_ms()
-        hour_ago = now - STATS_WINDOW_MS
-        half_hour_ago = now - STATS_WINDOW_MS // 2
-        rx_hour = [e for e in self._rx_log if e[0] - hour_ago >= 0]
-        rx_half = [e[1] for e in rx_hour if e[0] - half_hour_ago >= 0 and e[1] is not None]
-        tx_ms = sum(e[1] for e in self._tx_log if e[0] - hour_ago >= 0)
-        elapsed = min(max(now - self._stats_start_ms, 1), STATS_WINDOW_MS)
+        rx_hour = [e for e in self._rx_log if tdiff(now, e[0]) <= STATS_WINDOW_MS]
+        rx_half = [e[1] for e in rx_hour
+                   if tdiff(now, e[0]) <= STATS_WINDOW_MS // 2 and e[1] is not None]
+        tx_ms = sum(e[1] for e in self._tx_log if tdiff(now, e[0]) <= STATS_WINDOW_MS)
+        elapsed = min(max(tdiff(now, self._stats_start_ms), 1), STATS_WINDOW_MS)
         return {
             "noise_dbm": self._noise[-1] if self._noise else None,
             "noise_series": list(self._noise),
             "peak_rssi_30m": max(rx_half) if rx_half else None,
             "packets_per_h": len(rx_hour),
             "tx_air_pct": round(tx_ms * 100.0 / elapsed, 1),
-            "last_rx_s": None if self._last_rx_ms is None else (now - self._last_rx_ms) // 1000,
+            "last_rx_s": None if self._last_rx_ms is None else tdiff(now, self._last_rx_ms) // 1000,
             "rx_on": bool(self._radio_ready),
         }
 
@@ -321,9 +351,9 @@ class MeshCoreManager:
                       "sf": int(preset["sf"]), "cr": int(preset["cr"])}
         try:
             from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_dict("radio", stored)
-            ed.commit()
+            self._commit(ed)
         except Exception as e:
             print("MeshCore: radio preset write error:", repr(e))
             return
@@ -345,9 +375,9 @@ class MeshCoreManager:
         on = bool(on)
         try:
             from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_bool("service_enabled", on)
-            ed.commit()
+            self._commit(ed)
         except Exception as e:
             print("MeshCore: set_service_enabled error:", repr(e))
         if on:
@@ -356,27 +386,98 @@ class MeshCoreManager:
             self.stop()
         self._notify("service", on)
 
+    def _editor(self, filename="config.json"):
+        """A prefs editor holding the prefs lock until _commit(); a lock stuck for 2 s is
+        taken over rather than deadlocking the radio worker."""
+        from mpos import SharedPreferences
+        try:
+            self._prefs_lock.acquire(1, 2)
+        except TypeError:
+            self._prefs_lock.acquire()
+        try:
+            return SharedPreferences(NICKNAME_PREFS, filename=filename).edit()
+        except Exception:
+            self._prefs_lock.release()
+            raise
+
+    def _commit(self, ed):
+        try:
+            ed.commit()
+        finally:
+            try:
+                self._prefs_lock.release()
+            except Exception:
+                pass
+
     def _load_identity(self):
-        """Read keypair + nickname from prefs once; the getters serve these cached copies.
-        (Every SharedPreferences() re-reads and parses the whole JSON file.)"""
+        """Read keypair + nickname once; the getters serve these cached copies. The keypair
+        lives in its own file, written once, so a torn write of the busy settings file can
+        never cost the node its identity. An older install kept it in config.json: move it."""
         self._pub = self._prv = None
         self._nick = ""
+        self._last_ts = 0
         try:
             import binascii
             from mpos import SharedPreferences
             p = SharedPreferences(NICKNAME_PREFS)
-            pub = p.get_string("identity_pub", "")
-            prv = p.get_string("identity_prv", "")
+            ident = SharedPreferences(NICKNAME_PREFS, filename=IDENTITY_FILE)
+            pub = ident.get_string("pub", "") or ""
+            prv = ident.get_string("prv", "") or ""
+            legacy = not (pub and prv)
+            if legacy:
+                pub = p.get_string("identity_pub", "") or ""
+                prv = p.get_string("identity_prv", "") or ""
             if pub and prv:
                 # MicroPython's unhexlify needs bytes (CPython also accepts str)
                 self._pub = binascii.unhexlify(pub.encode())
                 self._prv = binascii.unhexlify(prv.encode())
+                if legacy:
+                    self._save_identity(self._pub, self._prv)
             self._nick = p.get_string("nickname", "") or ""
+            self._last_ts = p.get_int("last_ts", 0) or 0
         except Exception as e:
             print("MeshCore: identity load error:", repr(e))
 
+    def _save_identity(self, pub, prv):
+        import binascii
+        ed = self._editor(IDENTITY_FILE)
+        ed.put_string("pub", binascii.hexlify(pub).decode())
+        ed.put_string("prv", binascii.hexlify(prv).decode())
+        self._commit(ed)
+        ed = self._editor()
+        ed.put_string("identity_pub", "")
+        ed.put_string("identity_prv", "")
+        self._commit(ed)
+
     def nickname(self):
         return self._nick or self.default_nickname()
+
+    def _note_heard_ts(self, ts):
+        """Remember the newest plausible timestamp heard from the mesh (clock fallback)."""
+        if ts and ts > self._newest_heard_ts and ts > CLOCK_VALID_AFTER:
+            self._newest_heard_ts = ts
+
+    def _timestamp(self, unique=False):
+        """Unix time for an outgoing packet. Without a set clock (no Wi-Fi), fall back to
+        the newest time heard on the mesh (BaseChatMesh::bootstrapRTCfromContacts), and
+        never go back in time. unique=True (adverts) makes it strictly increasing and
+        persists it: peers drop an advert that is not newer than the last one."""
+        t = unix_time()
+        if t < CLOCK_VALID_AFTER:
+            t = max(t, self._newest_heard_ts)
+        if unique:
+            if t <= self._last_ts:
+                t = self._last_ts + 1
+            self._last_ts = t
+            try:
+                ed = self._editor()
+                ed.put_int("last_ts", t)
+                self._commit(ed)
+            except Exception as e:
+                print("MeshCore: last_ts write error:", repr(e))
+        elif t < self._last_ts:
+            t = self._last_ts
+        return t
 
     def default_nickname(self):
         """MC-<first 4 hex of the public key>, so two nodes never share a default name.
@@ -395,9 +496,9 @@ class MeshCoreManager:
             return False
         try:
             from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_string("nickname", name)
-            ed.commit()
+            self._commit(ed)
             self._nick = name
             return True
         except Exception as e:
@@ -429,12 +530,7 @@ class MeshCoreManager:
             print("MeshCore: keygen failed:", repr(e))
             return None
         try:
-            import binascii
-            from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
-            ed.put_string("identity_pub", binascii.hexlify(pub).decode())
-            ed.put_string("identity_prv", binascii.hexlify(prv).decode())
-            ed.commit()
+            self._save_identity(pub, prv)
             print("MeshCore: identity generated, node id 0x%02x" % pub[0])
         except Exception as e:
             print("MeshCore: save identity error:", repr(e))
@@ -534,7 +630,7 @@ class MeshCoreManager:
         if pub is None:
             return (False, "no identity -- generate one first")
         try:
-            ts = unix_time()
+            ts = self._timestamp(unique=True)
             app_data = build_advert_appdata(ADV_TYPE_CHAT, self.nickname())
             message = advert_signed_message(pub, ts, app_data)
             signature = meshcore_crypto.sign(prv, message, pub)
@@ -602,9 +698,9 @@ class MeshCoreManager:
             print("MeshCore: joined #%s (default channel)" % DEFAULT_CHANNEL)
         try:
             from mpos import SharedPreferences
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_bool("channels_seeded", True)
-            ed.commit()
+            self._commit(ed)
         except Exception as e:
             print("MeshCore: seed flag error:", repr(e))
 
@@ -618,9 +714,9 @@ class MeshCoreManager:
             custom = [{"name": c.name, "psk": c.psk_b64}
                       for c in self._channels
                       if c.name != PUBLIC_CHANNEL.name and c.psk_b64]
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_list("channels", custom)
-            ed.commit()
+            self._commit(ed)
         except Exception as e:
             print("MeshCore: save channels error:", repr(e))
 
@@ -892,6 +988,8 @@ class MeshCoreManager:
                 else:
                     print("MeshCoreManager: recv err=%s"
                           % meshcore_radio.status_name(self._radio, err))
+            elif events & IRQ_BUSY and not events & ~IRQ_BUSY & 0xFFFF:
+                pass        # a packet is still arriving: leave its flags for RX_DONE
             else:
                 # CRC error / timeout / header error: drop the flags; continuous RX goes on.
                 self._radio.clearIrqStatus()
@@ -919,29 +1017,57 @@ class MeshCoreManager:
         if not self._radio_lock.acquire(0):
             return True    # the worker is mid-SPI: not a gap
         try:
-            return bool(self._radio.getIrqStatus() & meshcore_radio.consts(self._radio).RX_DONE)
+            flags = self._radio.getIrqStatus()
+            if flags & meshcore_radio.consts(self._radio).RX_DONE:
+                return True
+            return self._receiving(flags)
         except Exception:
             return False
         finally:
             self._radio_lock.release()
+
+    def _receiving(self, flags):
+        """True while a packet is arriving (preamble or header seen, no RX_DONE yet), so
+        we do not transmit over it (firmware isReceiving()). A flag left by noise that never
+        became a packet is cleared after the longest possible packet's airtime."""
+        if not flags & IRQ_BUSY:
+            self._busy_since = None
+            return False
+        now = self._now_ms()
+        if self._busy_since is None:
+            self._busy_since = now
+            return True
+        if tdiff(now, self._busy_since) < self._busy_timeout_ms():
+            return True
+        self._busy_since = None
+        try:
+            self._radio.clearIrqStatus()
+        except Exception:
+            pass
+        return False
+
+    def _busy_timeout_ms(self):
+        return meshcore_presets.airtime_ms(self.radio_preset(), 255) + 200
 
     def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0, on_sent=None):
         """Queue an outgoing packet, due `delay_ms` (+ up to `jitter_ms`) from now; the worker
         transmits it in the first RX gap after that and then calls `on_sent(ok)`. All TX
         flows through here so the worker thread is the SOLE owner of the radio (no
         cross-thread SPI)."""
-        due = self._now_ms() + delay_ms
+        now = self._now_ms()
+        delay = delay_ms
         if jitter_ms > 0:
-            due += self._rand_byte() * jitter_ms // 256
+            delay += self._rand_byte() * jitter_ms // 256
+        due = tadd(now, delay)
         i = len(self._tx_queue)
-        while i > 0 and self._tx_queue[i - 1][0] > due:   # keep it sorted, FIFO among equals
+        while i > 0 and tdiff(self._tx_queue[i - 1][0], due) > 0:   # sorted, FIFO among equals
             i -= 1
         self._tx_queue.insert(i, (due, bytes(raw), on_sent))
 
     def _drain_tx(self):
         """Transmit the earliest queued packet if it is due; True if one went out (or was
         attempted)."""
-        if not self._tx_queue or self._tx_queue[0][0] - self._now_ms() > 0:
+        if not self._tx_queue or tdiff(self._tx_queue[0][0], self._now_ms()) > 0:
             return False
         _, raw, on_sent = self._tx_queue.pop(0)
         ok = False
@@ -1202,6 +1328,7 @@ class MeshCoreManager:
                 print("MeshCore: advert with a bad signature from %s dropped" % adv["id"])
                 return
             adv["verified"] = True
+            self._note_heard_ts(adv["timestamp"])
         self._seq += 1
         new_node = not node
         node.update(adv)
@@ -1261,6 +1388,7 @@ class MeshCoreManager:
             "rx_ms": self._now_ms(),
             "incoming": True,
         }
+        self._note_heard_ts(msg["ts"])
         if self._dup_message(("ch", decoded["channel"], msg["sender"], msg["text"]),
                              msg["ts"], window=CH_RESEND_WINDOW_S):
             print("MeshCore [%s] %s: (resend, already shown)" % (decoded["channel"], msg["sender"]))
@@ -1644,7 +1772,7 @@ class MeshCoreManager:
         try:
             import binascii
             import time
-            ts = unix_time()
+            ts = self._timestamp()
             dst_hash = binascii.unhexlify(pubkey_hex.encode())[0]
         except Exception as e:
             print("MeshCore: dm encode error:", repr(e))
@@ -1801,9 +1929,9 @@ class MeshCoreManager:
                     entry["path"] = path.hex()
                     entry["path_raw"] = c.get("path_raw") or len(path)
                 data[h] = entry
-            ed = SharedPreferences(NICKNAME_PREFS).edit()
+            ed = self._editor()
             ed.put_dict("contacts", data)
-            ed.commit()
+            self._commit(ed)
         except Exception as e:
             print("MeshCore: save contacts error:", repr(e))
 
@@ -1883,7 +2011,7 @@ class MeshCoreManager:
         if not (self._dirty_history or self._dirty_channels or self._unread_dirty):
             return
         now = self._now_ms()
-        if self._last_flush_ms is not None and now - self._last_flush_ms < FLUSH_EVERY_MS:
+        if self._last_flush_ms is not None and tdiff(now, self._last_flush_ms) < FLUSH_EVERY_MS:
             return
         self._flush_dirty()
 
@@ -1895,20 +2023,23 @@ class MeshCoreManager:
         except Exception:
             return
         if self._dirty_history or getattr(self, "_migrate_dm_history", False):
+            pending = set(self._dirty_history)
             self._dirty_history.clear()
             try:
                 data = {k: v for k, v in self._dm_messages.items() if k in self._contacts}
-                ed = SharedPreferences(NICKNAME_PREFS, filename=DM_HISTORY_FILE).edit()
+                ed = self._editor(DM_HISTORY_FILE)
                 ed.put_dict("h", data)
-                ed.commit()
+                self._commit(ed)
                 if getattr(self, "_migrate_dm_history", False):
-                    ed = SharedPreferences(NICKNAME_PREFS).edit()
+                    ed = self._editor()
                     ed.put_dict("dm_history", {})     # moved to its own file
-                    ed.commit()
+                    self._commit(ed)
                     self._migrate_dm_history = False
             except Exception as e:
+                self._dirty_history.update(pending)      # try again on the next flush
                 print("MeshCore: save DM history error:", repr(e))
         if self._dirty_channels:
+            pending = set(self._dirty_channels)
             self._dirty_channels.clear()
             try:
                 data = {}
@@ -1917,19 +2048,21 @@ class MeshCoreManager:
                     if msgs:
                         data[ch.name] = [{k: m.get(k) for k in _CH_STORED if k in m}
                                          for m in msgs[-CH_HISTORY_CAP:]]
-                ed = SharedPreferences(NICKNAME_PREFS, filename=CH_HISTORY_FILE).edit()
+                ed = self._editor(CH_HISTORY_FILE)
                 ed.put_dict("ch", data)
-                ed.commit()
+                self._commit(ed)
             except Exception as e:
+                self._dirty_channels.update(pending)
                 print("MeshCore: save channel history error:", repr(e))
         if self._unread_dirty:
             self._unread_dirty = False
             try:
-                ed = SharedPreferences(NICKNAME_PREFS, filename=UNREAD_FILE).edit()
+                ed = self._editor(UNREAD_FILE)
                 ed.put_dict("u", dict(self._unread))
                 ed.put_list("m", sorted(self._mentions))
-                ed.commit()
+                self._commit(ed)
             except Exception as e:
+                self._unread_dirty = True
                 print("MeshCore: save unread error:", repr(e))
 
     def _post_dm_notification(self, pubkey_hex, name, msg):
@@ -2015,7 +2148,7 @@ class MeshCoreManager:
             return False
         try:
             import time
-            ts = unix_time()
+            ts = self._timestamp()
         except Exception:
             ts = 0
         # reflect our own message locally right away (the actual TX happens shortly)
@@ -2047,9 +2180,9 @@ class MeshCoreManager:
 
     def _on_sent(self, rec, ok):
         """A queued message went on the air (or the radio refused it)."""
+        rec["sent_ms"] = self._now_ms()    # the retry clock runs even if the TX failed
         if not ok:
-            return                          # stays "sending"; the next attempt or resend
-        rec["sent_ms"] = self._now_ms()
+            return
         msg = rec["msg"]
         if not msg.get("tx"):
             msg["tx"] = True

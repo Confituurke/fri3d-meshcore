@@ -217,7 +217,11 @@ class FakePolledChip:
             return (b"", -6)
         return (self._frames.pop(0), 0)
 
+    send_status = 0                # set to e.g. -5 (TX timeout) to make send() fail
+
     def send(self, data):
+        if self.send_status:
+            return (0, self.send_status)
         self.sent.append(bytes(data))
         return (len(data), 0)
 
@@ -247,9 +251,11 @@ class FakePolledChip:
 def _install_clock(env):
     """MicroPython's ticks/sleep_ms on CPython, driven by env.now_ms (sleep_ms never blocks)."""
     import time
-    time.ticks_ms = lambda: env.now_ms
-    time.ticks_diff = lambda a, b: a - b
-    time.ticks_add = lambda a, b: a + b
+    period = 1 << 30            # MicroPython's ticks wrap at 2**30 ms (~12.4 days)
+    half = period // 2
+    time.ticks_ms = lambda: env.now_ms % period
+    time.ticks_diff = lambda a, b: ((a - b + half) % period) - half
+    time.ticks_add = lambda a, b: (a + b) % period
 
     def sleep_ms(ms):
         env.sleeps.append(ms)
