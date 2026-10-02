@@ -38,19 +38,27 @@ com.confituurke.meshcore/    # the app payload — exactly what ships in the .mp
   meshcore_dm.py             # direct-message + ack codec
   meshcore_radio.py          # driver adapter + radio lock helpers
   meshcore_boot_service.py   # boot_completed service (starts the radio if enabled)
-  fonts/                     # Archivo Narrow (OFL)
+  ui_model.py                # what the screens show (pure Python, desktop-tested)
+  ui_theme.py                # colours, fonts, shared styles, header / chips / tab bar
+  fonts/                     # Archivo Narrow + Mesh Mono (subset of IBM Plex Mono), OFL
 tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
 tools/check_app.py           # bundle checks (compiles, manifest, icon)
+tools/run_tests.sh           # the desktop test suite
+tools/make_fonts.py          # builds the subset fonts (needs fontTools)
+tools/deploy.sh              # copy the app to a device over USB serial
+tools/engine_probe.py        # run the engine on a device without the UI
 build_mpk.py                 # build the .mpk locally (no external deps)
 ```
 
 ## Install for development
 
 ```
-mpremote connect /dev/ttyUSB0 fs cp -r com.confituurke.meshcore :/apps/
+MPREMOTE=mpremote PYTHON=python3 tools/deploy.sh --start
 ```
 
-Then restart the device, or call `AppManager.refresh_apps()`.
+MicroPythonOS's asyncio REPL ignores mpremote, so `deploy.sh` first types
+`TaskManager.stop()` into it slowly (`tools/repl_type.py`, needs pyserial), copies the app to
+`/apps/`, and then restarts the device.
 
 ## Develop
 
@@ -82,9 +90,11 @@ Adapts, or interoperates with, these MIT-licensed works (full notices in
 - **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell: the protocol and wire-format
   reference, and the wordmark the app icon is derived from.
 
-The chat font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
-Archivo Narrow Project Authors. It is used under the **SIL Open Font License 1.1** (licence at
-`com.confituurke.meshcore/fonts/OFL.txt`).
+The text font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
+Archivo Narrow Project Authors. The font for IDs and numbers is **Mesh Mono**, a subset of
+[IBM Plex Mono](https://github.com/IBM/plex) © IBM Corp., renamed because "Plex" is a Reserved
+Font Name. Both are used under the **SIL Open Font License 1.1**; the licences ship in
+`com.confituurke.meshcore/fonts/`.
 
 MESHCORE is a trademark of its owner. This is an independent, community-built client; it is not
 affiliated with or endorsed by the MeshCore project.

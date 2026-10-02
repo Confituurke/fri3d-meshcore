@@ -41,13 +41,25 @@ Copyright 2019 The Archivo Narrow Project Authors
 https://github.com/Omnibus-Type/ArchivoNarrow
 
 Licensed under the SIL Open Font License, Version 1.1 -- **not** the MIT License that covers
-the rest of this app. The full text ships with the font at
+the rest of this app. The full text ships with the fonts at
 `com.confituurke.meshcore/fonts/OFL.txt`, as the OFL requires.
 
-`com.confituurke.meshcore/fonts/ArchivoNarrow-Regular.ttf` is the upstream Regular (v3.002),
-subset to Latin-1 plus common punctuation so it costs 17 KB instead of 91 KB on badge flash.
-The OFL permits this: the font carries no Reserved Font Name, so the modified copy may keep
-the family name. It is bundled and rendered, never sold on its own.
+`ArchivoNarrow-Regular.ttf` and `ArchivoNarrow-SemiBold.ttf` are instances (weights 400 and
+600) of the upstream variable font, subset to Latin-1 plus a few symbols by
+`tools/make_fonts.py`. The font carries no Reserved Font Name, so the modified copies keep the
+family name. They are bundled and rendered, never sold on their own.
+
+## Mesh Mono (a subset of IBM Plex Mono)
+Copyright 2017 IBM Corp., with Reserved Font Name "Plex"
+https://github.com/IBM/plex
+
+Licensed under the SIL Open Font License, Version 1.1; the full text ships at
+`com.confituurke.meshcore/fonts/OFL-IBMPlexMono.txt`.
+
+`MeshMono-Regular.ttf` is IBM Plex Mono Regular subset to Latin-1 plus a few symbols by
+`tools/make_fonts.py`. Because "Plex" is a Reserved Font Name, the modified font is renamed
+"Mesh Mono"; its copyright and trademark records are unchanged. IBM Plex is a trademark of
+IBM Corp.
 
 ---
 
