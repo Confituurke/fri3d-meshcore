@@ -19,7 +19,9 @@ set -- "$@"
 start=0
 [ "$1" = "--start" ] && start=1
 
-$PY tools/repl_type.py "$PORT" "import mpos; mpos.TaskManager.stop()" 3 >/dev/null
+$PY tools/repl_type.py "$PORT" --stop
+# A running radio manager prints to the console, which breaks mpremote's transfers.
+$PY tools/repl_type.py "$PORT" "import sys; m = sys.modules.get('meshcore_manager'); m and m.MeshCoreManager.get_instance().stop()" 3 >/dev/null
 
 args="connect $PORT resume fs mkdir :/apps + fs mkdir $DEST + fs mkdir $DEST/fonts"
 $MP $args >/dev/null 2>&1 || true
@@ -31,8 +33,26 @@ done
 for f in $APP/fonts/*; do
     args="$args fs cp $f $DEST/fonts/ +"
 done
-args="$args exec \"import machine; machine.reset()\""
-eval "$MP $args" || true      # the reset drops the connection
+eval "$MP $args"
+
+# Check every file arrived whole (a disturbed transfer can leave an empty file).
+check="import os
+bad = []
+for f, n in ("
+for f in $APP/*.py $APP/MANIFEST.JSON $APP/icon_64x64.png $APP/fonts/*; do
+    check="$check('${f#$APP/}', $(wc -c < "$f")),"
+done
+check="$check):
+    try:
+        if os.stat('/apps/$APP/' + f)[6] != n: bad.append(f)
+    except OSError:
+        bad.append(f)
+print('BAD' if bad else 'ALL OK', bad)"
+result=$($MP connect "$PORT" resume exec "$check")
+echo "$result"
+case "$result" in *"ALL OK"*) ;; *) echo "deploy incomplete"; exit 1 ;; esac
+
+$MP connect "$PORT" resume exec "import machine; machine.reset()" || true   # drops the link
 
 if [ $start -eq 1 ]; then
     sleep 12                  # boot + launcher

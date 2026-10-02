@@ -29,7 +29,11 @@ per operation on the device.
 com.confituurke.meshcore/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
   icon_64x64.png
-  meshcore.py                # UI (activities)
+  main_activity.py           # main screen: Chats / Nodes / Radio / Settings tabs
+  tab_chats.py, tab_nodes.py, tab_radio.py, tab_settings.py, ui_tabs.py
+  thread_activity.py         # channel and direct-message threads
+  node_activity.py           # node detail
+  setup_activity.py          # first-run setup and radio preset choice
   meshcore_manager.py        # radio owner + background service (singleton)
   meshcore_packet.py         # packet parse/serialize
   meshcore_channel.py        # group-channel codec (AES-128 + HMAC)
@@ -37,15 +41,19 @@ com.confituurke.meshcore/    # the app payload — exactly what ships in the .mp
   meshcore_advert.py         # advert parse/build + share URIs
   meshcore_dm.py             # direct-message + ack codec
   meshcore_radio.py          # driver adapter + radio lock helpers
+  meshcore_presets.py        # radio presets and LoRa airtime
   meshcore_boot_service.py   # boot_completed service (starts the radio if enabled)
   ui_model.py                # what the screens show (pure Python, desktop-tested)
   ui_theme.py                # colours, fonts, shared styles, header / chips / tab bar
   fonts/                     # Archivo Narrow + Mesh Mono (subset of IBM Plex Mono), OFL
 tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
+tests/graphical/             # screen tests on the MicroPythonOS desktop build (480x480)
 tools/check_app.py           # bundle checks (compiles, manifest, icon)
 tools/run_tests.sh           # the desktop test suite
 tools/make_fonts.py          # builds the subset fonts (needs fontTools)
+tools/run_graphical.sh       # run tests/graphical (MPOS_DIR = a MicroPythonOS checkout)
 tools/deploy.sh              # copy the app to a device over USB serial
+tools/push.py, tools/repl_type.py, tools/screenshot.sh   # device helpers
 tools/engine_probe.py        # run the engine on a device without the UI
 build_mpk.py                 # build the .mpk locally (no external deps)
 ```
@@ -69,7 +77,12 @@ for t in tests/test_*.py; do PYTHONPATH=com.confituurke.meshcore python3 "$t"; d
 python3 tools/check_app.py com.confituurke.meshcore --slug com.confituurke.meshcore
 ```
 
-Both run in CI on every push (`.github/workflows/ci.yml`).
+Both run in CI on every push (`.github/workflows/ci.yml`). The screen tests need a
+MicroPythonOS checkout with its unix build:
+
+```
+MPOS_DIR=/path/to/MicroPythonOS tools/run_graphical.sh
+```
 
 To build the package:
 

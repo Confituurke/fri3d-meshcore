@@ -8,10 +8,11 @@ import lvgl as lv
 from mpos import Activity, Intent, SharedPreferences
 
 import ui_theme as T
-import ui_tabs
+import ui_tabs  # noqa: F401
 import tab_chats
 import tab_nodes
 import tab_radio
+import tab_settings
 import thread_activity  # noqa: F401  (notification intents name its classes)
 import setup_activity
 from meshcore_manager import MeshCoreManager, MESHCORE_APP
@@ -21,7 +22,7 @@ class MeshCoreHome(Activity):
     TAB_LABELS = ("Chats", "Nodes", "Radio", "Settings")
 
     def tab_classes(self):
-        return (tab_chats.ChatsTab, tab_nodes.NodesTab, tab_radio.RadioTab, ui_tabs.SettingsTab)
+        return (tab_chats.ChatsTab, tab_nodes.NodesTab, tab_radio.RadioTab, tab_settings.SettingsTab)
 
     def onCreate(self):
         self.mgr = MeshCoreManager.get_instance()

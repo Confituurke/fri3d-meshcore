@@ -545,8 +545,9 @@ class MeshCoreManager:
         if simulation_mode:
             print("MeshCore: SIM advertise (id 0x%02x, %s)" % (pub[0], self.nickname()))
             return (True, None)
-        if self._radio is None:
-            return (False, "radio not ready")
+        if self._radio is None and not self._running:
+            return (False, "radio is off")
+        # While the radio is still starting, the packet waits in the TX queue.
         route = ROUTE_TYPE_FLOOD if flood else ROUTE_TYPE_DIRECT
         pkt = MeshCorePacket(make_header(route, PAYLOAD_TYPE_ADVERT),
                              encode_path_len(0), b"", payload)

@@ -97,6 +97,17 @@ def test_zero_hop_advert_route():
     _assert(pkts[1].route_type == ROUTE_TYPE_FLOOD)
 
 
+def test_advert_queued_while_the_radio_starts():
+    env, m, _ = _setup()
+    m._radio = None
+    m._radio_ready = False
+    m._running = True                  # started; bring-up still in progress
+    _assert(m.advertise() == (True, None))
+    _assert(len(m._tx_queue) == 1)
+    m._running = False
+    _assert(m.advertise()[0] is False)  # radio off: nothing would ever send it
+
+
 def test_node_cap_evicts_oldest():
     import meshcore_manager as mm
     env, m, _ = _setup(native=False)
