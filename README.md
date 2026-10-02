@@ -52,8 +52,8 @@ tools/check_app.py           # bundle checks (compiles, manifest, icon)
 tools/run_tests.sh           # the desktop test suite
 tools/make_fonts.py          # builds the subset fonts (needs fontTools)
 tools/run_graphical.sh       # run tests/graphical (MPOS_DIR = a MicroPythonOS checkout)
-tools/deploy.sh              # copy the app to a device over USB serial
-tools/push.py, tools/repl_type.py, tools/screenshot.sh   # device helpers
+tools/deploy.sh              # install the app on a device over Wi-Fi
+tools/repl_type.py, tools/screenshot.sh   # device helpers
 tools/engine_probe.py        # run the engine on a device without the UI
 build_mpk.py                 # build the .mpk locally (no external deps)
 ```
@@ -61,12 +61,13 @@ build_mpk.py                 # build the .mpk locally (no external deps)
 ## Install for development
 
 ```
-MPREMOTE=mpremote PYTHON=python3 tools/deploy.sh --start
+HOST_IP=<this machine on the device's LAN> PYTHON=python3 tools/deploy.sh --start
 ```
 
-MicroPythonOS's asyncio REPL ignores mpremote, so `deploy.sh` first types
-`TaskManager.stop()` into it slowly (`tools/repl_type.py`, needs pyserial), copies the app to
-`/apps/`, and then restarts the device.
+`deploy.sh` builds the `.mpk`, serves it briefly from this machine and types the install
+command into the device's REPL over USB serial (`tools/repl_type.py`, needs pyserial). Bulk
+copies over the serial REPL are unreliable on the SenseCAP Indicator, so the package travels
+over Wi-Fi.
 
 ## Develop
 
