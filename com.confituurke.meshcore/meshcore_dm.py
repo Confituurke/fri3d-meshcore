@@ -147,6 +147,22 @@ def build_path_ack(secret, dst_hash, src_hash, path_bytes, path_len_raw, ack_has
     return bytes([dst_hash & 0xFF, src_hash & 0xFF]) + encrypt_then_mac(secret, data)
 
 
+def build_path_return(secret, dst_hash, src_hash, path, path_len_raw, extra_type=None,
+                      extra=b"", rand4=None):
+    """Build a PATH-return payload (Mesh::createPathReturn): dst+src+MAC+AES(path_len + path
+    + extra). Without an extra, a 0xFF marker and 4 random bytes keep the packet hash
+    unique."""
+    data = bytes([path_len_raw & 0xFF]) + bytes(path)
+    if extra_type is not None and extra:
+        data += bytes([extra_type & 0x0F]) + bytes(extra)
+    else:
+        if rand4 is None:
+            import os
+            rand4 = os.urandom(4)
+        data += b"\xff" + bytes(rand4)[:4]
+    return bytes([dst_hash & 0xFF, src_hash & 0xFF]) + encrypt_then_mac(secret, data)
+
+
 def decode_path(payload, self_hash, candidates):
     """Decode a PATH-return addressed to us; return dict with the embedded ack (or None).
 

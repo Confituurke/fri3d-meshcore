@@ -396,3 +396,32 @@ def make_fake_native():
     mod.verify = verify
     mod.key_exchange = key_exchange
     return mod
+
+
+PEER_SEED = bytes([7]) * 32
+
+
+def with_peer(env, m, name="Alex", seed=PEER_SEED):
+    """Give the manager an identity and one contact; returns (peer_pub, peer_prv, secret)
+    where `secret` is what the peer derives for talking to us."""
+    import meshcore_crypto as mc
+    if not m.has_identity():
+        m.generate_identity()
+    our_pub, _ = m.get_identity()
+    peer_pub, peer_prv = mc.generate_keypair(seed=seed)
+    ok, err = m.add_contact(peer_pub.hex(), name)
+    assert ok, err
+    return peer_pub, peer_prv, mc.shared_secret(peer_prv, our_pub)
+
+
+def sent_packets(chip):
+    from meshcore_packet import MeshCorePacket
+    return [MeshCorePacket.parse(raw) for raw in chip.sent]
+
+
+def drain(m):
+    """Transmit everything that is due now; returns how many packets went out."""
+    n = 0
+    while m._drain_tx():
+        n += 1
+    return n

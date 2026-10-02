@@ -68,6 +68,11 @@ CH_MAX_SENDS = 3
 
 # Radio re-init rate limit. Doubles per consecutive failure, resets once RX is healthy --
 # see _attempt_reinit for why an unrecoverable radio must go quiet rather than keep resetting.
+# TX timing, as in the firmware (BaseChatMesh.cpp TXT_ACK_DELAY, Mesh.cpp reciprocal path).
+ACK_DELAY_MS = 200
+ACK_JITTER_MS = 100
+PATH_RETURN_DELAY_MS = 500
+
 REINIT_BACKOFF_MS = 5000
 REINIT_BACKOFF_MAX_MS = 60000
 
@@ -103,7 +108,7 @@ class MeshCoreManager:
         self._subscribers = []
         self._sim_started = False
         self._rx_queue = []                      # (raw, rssi, snr) awaiting processing
-        self._tx_queue = []                      # raw packet bytes awaiting transmit
+        self._tx_queue = []                      # (due_ms, raw) awaiting transmit, by due time
         self._worker_running = False
         self._last_rx_check_ms = 0               # RX watchdog: last chip-mode check
         self._last_reinit_ms = 0                 # RX watchdog: last full re-init (rate limit)
@@ -808,10 +813,29 @@ class MeshCoreManager:
         finally:
             self._radio_lock.release()
 
-    def _enqueue_tx(self, raw):
-        """Queue an outgoing packet; the worker transmits it in the next RX gap. All TX flows
-        through here so the worker thread is the SOLE owner of the radio (no cross-thread SPI)."""
-        self._tx_queue.append(bytes(raw))
+    def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0):
+        """Queue an outgoing packet, due `delay_ms` (+ up to `jitter_ms`) from now; the worker
+        transmits it in the first RX gap after that. All TX flows through here so the worker
+        thread is the SOLE owner of the radio (no cross-thread SPI)."""
+        due = self._now_ms() + delay_ms
+        if jitter_ms > 0:
+            due += self._rand_byte() * jitter_ms // 256
+        i = len(self._tx_queue)
+        while i > 0 and self._tx_queue[i - 1][0] > due:   # keep it sorted, FIFO among equals
+            i -= 1
+        self._tx_queue.insert(i, (due, bytes(raw)))
+
+    def _drain_tx(self):
+        """Transmit the earliest queued packet if it is due; True if one went out (or was
+        attempted)."""
+        if not self._tx_queue or self._tx_queue[0][0] - self._now_ms() > 0:
+            return False
+        _, raw = self._tx_queue.pop(0)
+        try:
+            self._transmit(raw)
+        except Exception as e:
+            print("MeshCoreManager: tx drain error:", repr(e))
+        return True
 
     def _rx_watchdog(self):
         """Periodically (~2s) make sure the radio is still in continuous RX, and recover it
@@ -931,12 +955,7 @@ class MeshCoreManager:
             did_tx = False
             if (self._tx_queue and (simulation_mode or self._radio_ready)
                     and not did_rx and not self._rx_pending()):
-                raw = self._tx_queue.pop(0)
-                try:
-                    self._transmit(raw)
-                except Exception as e:
-                    print("MeshCoreManager: tx drain error:", repr(e))
-                did_tx = True
+                did_tx = self._drain_tx()
             # 4) Idle: run the RX watchdog (re-arm/re-init if the chip fell out of RX), flush
             #    any coalesced DM-history writes, then sleep briefly. No auto-advert.
             if not did_rx and not did_proc and not did_tx:
@@ -1221,14 +1240,15 @@ class MeshCoreManager:
             return int(time.time()) & 0xFF
 
     def _send_ack(self, got, pkt):
-        """Acknowledge a received DM.
+        """Acknowledge a received DM, ACK_DELAY_MS later (BaseChatMesh::onPeerDataRecv).
 
         A DM that reached us by FLOOD gets a PATH-return carrying the ack: that is what
         teaches the sender the route to us, so their next message can come direct. One that
         already arrived DIRECT needs no route lesson, so it gets a plain ACK -- sent back
-        along the route we learned from them, or flooded if we have not learned one."""
-        if pkt.route_type == ROUTE_TYPE_FLOOD or not self._contacts.get(
-                got["pubkey"].hex(), {}).get("path"):
+        along the route we learned from them, or flooded if we have not learned one. (A
+        PATH-return for a DIRECT packet would teach a zero-hop route: its path is used up by
+        the time it reaches us.)"""
+        if pkt.is_route_flood():
             self._send_path_ack(got, pkt)
         else:
             self._send_bare_ack(got)
@@ -1242,7 +1262,7 @@ class MeshCoreManager:
             self._remember(out.packet_hash())
         except Exception:
             pass
-        self._enqueue_tx(out.to_bytes())
+        self._enqueue_tx(out.to_bytes(), ACK_DELAY_MS, ACK_JITTER_MS)
 
     def _send_path_ack(self, got, pkt):
         """Reply to a received DM with a flood PATH-return embedding its ack hash."""
@@ -1264,7 +1284,7 @@ class MeshCoreManager:
             self._remember(out.packet_hash())   # de-dupe the repeater's echo of our ack
         except Exception:
             pass
-        self._enqueue_tx(out.to_bytes())
+        self._enqueue_tx(out.to_bytes(), ACK_DELAY_MS, ACK_JITTER_MS)
 
     def _handle_path(self, pkt):
         """A PATH-return addressed to us may carry the ACK for a DM we sent -> mark delivered."""
@@ -1286,7 +1306,30 @@ class MeshCoreManager:
         self._learn_path(dec)
         if dec.get("ack_hash"):
             self._mark_delivered(dec["ack_hash"])
+        if pkt.is_route_flood():
+            self._send_path_return(dec, pkt)
         return True
+
+    def _send_path_return(self, dec, pkt):
+        """Answer a flooded PATH with our own route back, sent DIRECT along the path it just
+        taught us (Mesh.cpp, onPeerPathRecv): the sender then knows the route in both
+        directions."""
+        contact = self._contacts.get(dec["pubkey"].hex())
+        pub, _ = self.get_identity()
+        if contact is None or pub is None:
+            return
+        secret = self._node_secret(contact)
+        if secret is None:
+            return
+        payload = meshcore_dm.build_path_return(secret, dec["src_hash"], pub[0],
+                                                pkt.path, pkt.path_len_raw)
+        out = MeshCorePacket(make_header(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_PATH),
+                             dec["path_len_raw"], dec["path"], payload)
+        try:
+            self._remember(out.packet_hash())
+        except Exception:
+            pass
+        self._enqueue_tx(out.to_bytes(), PATH_RETURN_DELAY_MS)
 
     def _learn_path(self, dec):
         """A contact told us the route back to them -- send DIRECT from now on.
