@@ -484,3 +484,43 @@ class MaxHopsActivity(_FormActivity):
             self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)
             return
         self.finish()
+
+
+class AddContactActivity(_FormActivity):
+    """A contact by its public key or a meshcore:// contact card, with a name and a type."""
+
+    title = "Add contact"
+    TYPES = (("Companion", 1), ("Repeater", 2), ("Room", 3), ("Sensor", 4))
+
+    def build(self):
+        self._key = self.field("Public key or contact card", "",
+                               "64 hex characters, or meshcore://contact/add?…")
+        self._first = self._key
+        self._name = self.field("Name (optional)", "", "as it should show")
+        T.label(self.body, "Type", 15, col=T.MUTED)
+        self.type = 1
+        self.types = T.Segmented(self.body, [t[0] for t in self.TYPES], self.set_type, 0)
+        self._msg = self.hint("A contact card fills in the name and type itself.")
+        T.button(self.body, "Add contact", self.save, width=lv.pct(100))
+
+    def set_type(self, i):
+        self.type = self.TYPES[i][1]
+        self.types.set_selected(i)
+
+    def save(self):
+        from meshcore_advert import parse_contact_text
+        got = parse_contact_text(self._key.get_text())
+        if got is None:
+            self._msg.set_text("That is not a public key (64 hex characters) or a contact card.")
+            self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)
+            return
+        key, card_name, card_type = got
+        name = self._name.get_text().strip() or card_name
+        node_type = card_type if card_name or "meshcore://" in self._key.get_text() else self.type
+        ok, err = self.mgr.add_contact(key, name, node_type)
+        if not ok:
+            self._msg.set_text(err or "could not add")
+            self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)
+            return
+        self.added = key
+        self.finish()

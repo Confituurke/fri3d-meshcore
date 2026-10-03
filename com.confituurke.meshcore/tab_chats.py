@@ -39,8 +39,22 @@ class ChatsTab(Tab):
         self.refresh()
 
     def new_chat(self):
-        """A chat starts from a node: open Nodes on the companions."""
-        self.activity.select(1)
+        """The + offers what can be started from here."""
+        import settings_pages
+        import tab_nodes
+        self.sheet = T.ActionSheet("New", [
+            ("New channel", lambda: self._open(settings_pages.AddChannelActivity)),
+            ("Message a contact", self.pick_contact),
+            ("Add contact by key", lambda: self._open(settings_pages.AddContactActivity)),
+            ("Discovered nodes", lambda: self._open(tab_nodes.DiscoveredActivity)),
+        ], "Start a chat, join a channel or add someone")
+
+    def _open(self, cls):
+        self.activity.startActivity(Intent(activity_class=cls))
+
+    def pick_contact(self):
+        """Contacts to message: the companions among them."""
+        self.activity.select([t[0] for t in self.activity.TABS].index("Contacts"))
         tab = self.activity._tab
         if hasattr(tab, "set_filter"):
             tab.set_filter("chat")

@@ -160,3 +160,55 @@ def contact_share_uri(name, public_key_hex, node_type=ADV_TYPE_CHAT):
     """Build the meshcore:// contact-card URI to render as a QR / share as text."""
     return "meshcore://contact/add?name=%s&public_key=%s&type=%d" % (
         _url_quote(name), public_key_hex, node_type & 0xFF)
+
+
+def _url_unquote(s):
+    """The reverse of _url_quote ('+' -> space, %XX -> byte, utf-8)."""
+    out = bytearray()
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == "+":
+            out.append(0x20)
+        elif c == "%" and i + 3 <= len(s):
+            try:
+                out.append(int(s[i + 1:i + 3], 16))
+                i += 3
+                continue
+            except ValueError:
+                out.append(ord(c))
+        else:
+            out.extend(c.encode("utf-8"))
+        i += 1
+    return out.decode("utf-8")
+
+
+def _hex_key(text):
+    h = "".join(text.split()).lower()
+    if len(h) != 64 or any(c not in "0123456789abcdef" for c in h):
+        return None
+    return h
+
+
+def parse_contact_text(text):
+    """(public key hex, name or None, node type) from a 64-hex key (spaces allowed) or a
+    meshcore://contact/add?name=..&public_key=..&type=.. card; None otherwise."""
+    t = (text or "").strip()
+    prefix = "meshcore://contact/add?"
+    if t.startswith(prefix):
+        params = {}
+        for part in t[len(prefix):].split("&"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                params[k] = v
+        key = _hex_key(params.get("public_key", ""))
+        if key is None:
+            return None
+        try:
+            node_type = int(params.get("type", "1"))
+        except ValueError:
+            node_type = ADV_TYPE_CHAT
+        name = _url_unquote(params["name"]) if "name" in params else None
+        return key, name or None, node_type
+    key = _hex_key(t)
+    return (key, None, ADV_TYPE_CHAT) if key else None
