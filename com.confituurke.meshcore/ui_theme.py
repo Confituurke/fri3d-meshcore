@@ -639,6 +639,7 @@ class Segmented:
         self.set_selected(selected)
 
     def set_selected(self, idx):
+        self.selected = idx
         for i, (seg, lb) in enumerate(self._segs):
             on = i == idx
             seg.set_style_bg_color(color(OUTLINE), lv.PART.MAIN)

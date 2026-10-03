@@ -37,6 +37,7 @@ class TestRouting(unittest.TestCase):
         self.assertEqual(type(page).__name__, "RoutingActivity")
         page.choose("manual")
         wait_for_render(5)
+        self.assertEqual(page.modes.selected, 2)          # Manual shows as chosen while typing
         page.path.set_text("a1,zz")
         page.save()
         self.assertIn("hex", page.error.get_text())

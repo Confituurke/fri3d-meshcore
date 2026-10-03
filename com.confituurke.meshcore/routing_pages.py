@@ -80,8 +80,8 @@ class RoutingActivity(_Page):
                     long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
         T.section_label(body, "Send")
         modes = ("auto", "flood", "manual")
-        T.Segmented(body, ["Auto", "Flood", "Manual"], lambda i: self.choose(modes[i]),
-                    modes.index(mode))
+        self.modes = T.Segmented(body, ["Auto", "Flood", "Manual"], lambda i: self.choose(modes[i]),
+                                 2 if self.extras.get("editing") else modes.index(mode))
         size = self.mgr.path_hash_size()
         if mode == "manual" or self.extras.get("editing"):
             self.path = self.field(path, ",".join(["a1b2c3"[:2 * size]] * 2))
