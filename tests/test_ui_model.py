@@ -174,8 +174,8 @@ def test_age_text():
 def test_preset_summary_airtime():
     fake_mpos.install()
     import meshcore_presets
-    title, detail, air = _ui().preset_summary(meshcore_presets.PRESETS[0], 22)
-    _assert(title == "EU/UK Narrow")
+    title, detail, air = _ui().preset_summary(meshcore_presets.by_id("eu-narrow"), 22)
+    _assert(title == "EU/UK (Narrow)")
     _assert(detail == "869.618 MHz · 62.5 kHz · SF8 · CR 4/8 · 22 dBm", detail)
     _assert(air == "≈ 0.54 s on air per 40-byte message", air)
 

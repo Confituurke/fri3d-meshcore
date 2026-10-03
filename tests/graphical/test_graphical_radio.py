@@ -24,7 +24,7 @@ class TestRadio(unittest.TestCase):
         mc_fixtures.open_app(tab=2)
         scr = lv.screen_active()
         for text in ("−106", "Packets 6/h", "Peak −74", "TX air 0.1 %",
-                     "RX on · last packet 40 s ago", "EU/UK Narrow",
+                     "RX on · last packet 40 s ago", "EU/UK (Narrow)",
                      "≈ 0.54 s on air per 40-byte message"):
             self.assertIsNotNone(find_label_with_text(scr, text), text)
 

@@ -6,10 +6,21 @@ sync word follow from MeshCore's firmware (RadioLibWrappers.h: 32 preamble symbo
 SF <= 8, else 16; private sync word 0x12).
 """
 
+# The presets the MeshCore apps offer (names and values as the RRY map bot lists them).
 PRESETS = [
-    {"id": "eu-narrow", "name": "EU/UK Narrow", "freq": 869.618, "bw": 62.5, "sf": 8, "cr": 8},
-    {"id": "eu-legacy", "name": "EU/UK (old)", "freq": 869.525, "bw": 250, "sf": 11, "cr": 5},
-    {"id": "eu-433", "name": "EU 433 Narrow", "freq": 433.650, "bw": 62.5, "sf": 8, "cr": 8},
+    {"id": "au", "name": "Australia", "freq": 915.800, "bw": 250, "sf": 10, "cr": 5},
+    {"id": "au-vic", "name": "Australia: Victoria", "freq": 916.675, "bw": 62.5, "sf": 7, "cr": 8},
+    {"id": "eu-narrow", "name": "EU/UK (Narrow)", "freq": 869.618, "bw": 62.5, "sf": 8, "cr": 8},
+    {"id": "eu-long", "name": "EU/UK (Long Range)", "freq": 869.525, "bw": 250, "sf": 11, "cr": 5},
+    {"id": "eu-medium", "name": "EU/UK (Medium Range)", "freq": 869.525, "bw": 250, "sf": 10, "cr": 5},
+    {"id": "cz-narrow", "name": "Czech Republic (Narrow)", "freq": 869.525, "bw": 62.5, "sf": 7, "cr": 5},
+    {"id": "eu-433-long", "name": "EU 433MHz (Long Range)", "freq": 433.650, "bw": 250, "sf": 11, "cr": 5},
+    {"id": "nz", "name": "New Zealand", "freq": 917.375, "bw": 250, "sf": 11, "cr": 5},
+    {"id": "nz-narrow", "name": "New Zealand (Narrow)", "freq": 917.375, "bw": 62.5, "sf": 7, "cr": 5},
+    {"id": "pt-433", "name": "Portugal 433", "freq": 433.375, "bw": 62.5, "sf": 9, "cr": 6},
+    {"id": "pt-868", "name": "Portugal 868", "freq": 869.618, "bw": 62.5, "sf": 7, "cr": 6},
+    {"id": "us-ca", "name": "USA/Canada (Recommended)", "freq": 910.525, "bw": 62.5, "sf": 7, "cr": 5},
+    {"id": "vn", "name": "Vietnam", "freq": 920.250, "bw": 250, "sf": 11, "cr": 5},
 ]
 DEFAULT_PRESET = "eu-narrow"
 SYNC_WORD = 0x12

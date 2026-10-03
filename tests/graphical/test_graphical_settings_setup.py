@@ -64,11 +64,11 @@ class TestSetup(unittest.TestCase):
         self.assertTrue(click_label("Change"))
         wait_for_render(20)
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "SetupActivity")
-        self.assertTrue(click_label("EU 433 Narrow"))
+        self.assertTrue(click_label("Czech Republic (Narrow)"))
         wait_for_render(5)
         self.assertTrue(click_label("Save"))
         wait_for_render(20)
-        self.assertEqual(self.m.radio_preset()["id"], "eu-433")
+        self.assertEqual(self.m.radio_preset()["id"], "cz-narrow")
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "MeshCoreHome")
 
 
