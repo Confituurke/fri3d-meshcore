@@ -23,8 +23,10 @@ except Exception as e:
     print("MeshCoreManager: simulation mode (no machine module): %s" % e)
     simulation_mode = True
 
+import meshcore_region
 from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
                              ROUTE_TYPE_FLOOD, ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_GRP_TXT,
+                             ROUTE_TYPE_TRANSPORT_FLOOD, PH_ROUTE_MASK,
                              PAYLOAD_TYPE_ADVERT, PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_PATH,
                              PAYLOAD_TYPE_ACK, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE,
                              PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE)
@@ -118,7 +120,8 @@ NODES_FILE = "nodes.json"                   # {"n": {pubkey: node}} heard by adv
 NODES_FLUSH_MS = 60000      # heard nodes change with every advert: write them at most this often
 _NODE_STORED = ("name", "type", "lat", "lon", "timestamp", "hops", "snr", "rssi", "path",
                 "route", "verified", "heard_ts", "seq")
-_CH_STORED = ("ts", "sender", "text", "incoming", "snr", "hops", "tx", "heard", "unheard")
+_CH_STORED = ("ts", "sender", "text", "incoming", "snr", "hops", "tx", "heard", "unheard",
+              "rssi", "path", "hsize", "region")
 MAX_NODES = 100         # learned-nodes cap (RAM): companions, repeaters, rooms, sensors
 # Resends. A byte-identical packet is useless: every node keeps a "seen" table of packet
 # hashes, so repeaters refuse to re-flood it and the recipient drops it before it can even
@@ -271,6 +274,7 @@ class MeshCoreManager:
         self._load_channel_history()
         self._load_unread()
         self._load_position()
+        self._load_routing()
 
     def is_running(self):
         return self._running
@@ -1103,7 +1107,7 @@ class MeshCoreManager:
     def _busy_timeout_ms(self):
         return meshcore_presets.airtime_ms(self.radio_preset(), 255) + 200
 
-    def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0, on_sent=None):
+    def _enqueue_tx(self, raw, delay_ms=0, jitter_ms=0, on_sent=None, channel=None):
         """Queue an outgoing packet, due `delay_ms` (+ up to `jitter_ms`) from now; the worker
         transmits it in the first RX gap after that and then calls `on_sent(ok)`. All TX
         flows through here so the worker thread is the SOLE owner of the radio (no
@@ -1113,6 +1117,7 @@ class MeshCoreManager:
         if jitter_ms > 0:
             delay += self._rand_byte() * jitter_ms // 256
         due = tadd(now, delay)
+        raw = self._finish_flood(raw, channel)
         i = len(self._tx_queue)
         while i > 0 and tdiff(self._tx_queue[i - 1][0], due) > 0:   # sorted, FIFO among equals
             i -= 1
@@ -1467,6 +1472,7 @@ class MeshCoreManager:
             "rx_ms": self._now_ms(),
             "incoming": True,
         }
+        msg.update(self._route_info(pkt))
         self._note_heard_ts(msg["ts"])
         if self._dup_message(("ch", decoded["channel"], msg["sender"], msg["text"]),
                              msg["ts"], window=CH_RESEND_WINDOW_S):
@@ -1558,6 +1564,7 @@ class MeshCoreManager:
         msg = {"ts": got["timestamp"], "sender": name, "text": got["text"],
                "rssi": rssi, "snr": pkt.snr, "hops": self._hops(pkt),
                "rx_ms": self._now_ms(), "incoming": True}
+        msg.update(self._route_info(pkt))
         # A resend must still be ACKED -- they are resending precisely because our ack was
         # lost -- but it must not show up in the chat a second time.
         dup = self._dup_message(("dm", pub_hex, got["text"]), msg["ts"])
@@ -1923,6 +1930,127 @@ class MeshCoreManager:
             self.add_contact(pk, node.get("name"), node.get("type"))
 
     # --- buzzer ------------------------------------------------------------ #
+    # --- path hash size and region scopes ----------------------------------- #
+    def _load_routing(self):
+        self._hash_size = 1
+        self._regions = []
+        self._default_region = None
+        self._channel_scopes = {}       # channel -> "none" or a region; absent: the default
+        try:
+            from mpos import SharedPreferences
+            prefs = SharedPreferences(NICKNAME_PREFS)
+            size = prefs.get_int("path_hash_size", 1)
+            self._hash_size = size if size in (1, 2, 3) else 1
+            self._regions = sorted(set(prefs.get_list("regions", []) or []))
+            d = prefs.get_string("default_region", "") or ""
+            self._default_region = d if d in self._regions else None
+            self._channel_scopes = dict(prefs.get_dict("channel_scopes", {}) or {})
+        except Exception as e:
+            print("MeshCore: routing settings load error:", repr(e))
+
+    def _save_routing(self):
+        try:
+            ed = self._editor()
+            ed.put_int("path_hash_size", self._hash_size)
+            ed.put_list("regions", list(self._regions))
+            ed.put_string("default_region", self._default_region or "")
+            ed.put_dict("channel_scopes", dict(self._channel_scopes))
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: routing settings save error:", repr(e))
+
+    def path_hash_size(self):
+        """Bytes per hop in the paths of the floods we send (1, 2 or 3)."""
+        return self._hash_size
+
+    def set_path_hash_size(self, size):
+        if size not in (1, 2, 3):
+            return (False, "1, 2 or 3 bytes")
+        self._hash_size = size
+        self._save_routing()
+        return (True, None)
+
+    def regions(self):
+        return list(self._regions)
+
+    def add_region(self, text):
+        name = meshcore_region.clean_name(text)
+        if name is None:
+            return (False, "letters, digits, - _ . only, up to %d" % meshcore_region.MAX_NAME)
+        if name in self._regions:
+            return (False, "already in the list")
+        self._regions = sorted(self._regions + [name])
+        self._save_routing()
+        return (True, None)
+
+    def remove_region(self, name):
+        self._regions = [r for r in self._regions if r != name]
+        if self._default_region == name:
+            self._default_region = None
+        for ch in [c for c, v in self._channel_scopes.items() if v == name]:
+            del self._channel_scopes[ch]
+        self._save_routing()
+
+    def default_region(self):
+        return self._default_region
+
+    def set_default_region(self, name):
+        """The scope of our floods (None: unscoped)."""
+        if name is not None and name not in self._regions:
+            return (False, "not a known region")
+        self._default_region = name
+        self._save_routing()
+        return (True, None)
+
+    def channel_scope(self, channel):
+        """"default" (the default scope), "none" (unscoped) or a region name."""
+        return self._channel_scopes.get(channel, "default")
+
+    def set_channel_scope(self, channel, value):
+        if value not in ("default", "none") and value not in self._regions:
+            return (False, "not a known region")
+        if value == "default":
+            self._channel_scopes.pop(channel, None)
+        else:
+            self._channel_scopes[channel] = value
+        self._save_routing()
+        return (True, None)
+
+    def _scope_for(self, channel=None):
+        if channel is not None:
+            v = self._channel_scopes.get(channel, "default")
+            if v == "none":
+                return None
+            if v != "default":
+                return v
+        return self._default_region
+
+    def _finish_flood(self, raw, channel=None):
+        """A flood we start (no hops yet) gets our path hash size and, with a scope, becomes a
+        TRANSPORT_FLOOD carrying the region's transport code (Mesh::sendFlood)."""
+        try:
+            pkt = MeshCorePacket.parse(raw)
+        except ValueError:
+            return raw
+        if pkt.route_type != ROUTE_TYPE_FLOOD or pkt.path_len_raw & 63:
+            return raw
+        pkt.path_len_raw = encode_path_len(0, self._hash_size)
+        name = self._scope_for(channel)
+        if name:
+            pkt.header = (pkt.header & ~PH_ROUTE_MASK) | ROUTE_TYPE_TRANSPORT_FLOOD
+            key = meshcore_region.region_key(name)
+            pkt.transport_codes = (meshcore_region.transport_code(key, pkt.payload_type,
+                                                                  pkt.payload), 0)
+        return pkt.to_bytes()
+
+    def _route_info(self, pkt):
+        """What a received packet says about its way here: path (hex), hash size, region."""
+        info = {"path": bytes(pkt.path).hex(), "hsize": (pkt.path_len_raw >> 6) + 1}
+        if pkt.route_type == ROUTE_TYPE_TRANSPORT_FLOOD:
+            info["region"] = meshcore_region.match_region(
+                pkt.transport_codes[0], pkt.payload_type, pkt.payload, self._regions) or "?"
+        return info
+
     # --- own position ---------------------------------------------------------- #
     def _load_position(self):
         self._position = None           # {"lat", "lon", "source": "manual" | "gps"}
@@ -2895,7 +3023,8 @@ class MeshCoreManager:
         except Exception:
             pass
         rec["sent_ms"] = None
-        self._enqueue_tx(pkt.to_bytes(), on_sent=lambda ok: self._on_sent(rec, ok))
+        self._enqueue_tx(pkt.to_bytes(), on_sent=lambda ok: self._on_sent(rec, ok),
+                         channel=rec["channel"])
 
     def _on_sent(self, rec, ok):
         """A queued message went on the air (or the radio refused it)."""
