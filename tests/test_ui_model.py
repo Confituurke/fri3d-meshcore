@@ -60,7 +60,7 @@ def test_chat_row_without_messages():
     env = fake_mpos.install()
     m = fake_mpos.new_manager(env)
     rows = _ui().chat_rows(m, NOW)
-    _assert(rows[0]["title"] == "Public" and rows[0]["preview"] == "" and rows[0]["time"] == "")
+    _assert(rows[0]["title"] == "Public" and rows[0]["preview"] == "No messages yet" and rows[0]["time"] == "")
 
 
 def test_preview_prefixes():

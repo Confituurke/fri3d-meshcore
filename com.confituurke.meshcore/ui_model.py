@@ -91,7 +91,7 @@ def initials(name):
 
 def _preview(msg, dm):
     if msg is None:
-        return ""
+        return "No messages yet"
     if not msg.get("incoming"):
         return "You: " + msg.get("text", "")
     if dm:

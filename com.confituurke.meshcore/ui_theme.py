@@ -591,6 +591,7 @@ def text_input(parent, text="", placeholder="", width=None):
     ta.set_style_pad_hor(14, lv.PART.MAIN)
     ta.set_style_pad_ver(9, lv.PART.MAIN)
     ta.set_style_bg_color(color(ACCENT), lv.PART.CURSOR)
+    ta.set_scrollbar_mode(lv.SCROLLBAR_MODE.OFF)
     return ta
 
 
