@@ -673,6 +673,7 @@ def switch(parent, on, on_change):
     sw.set_style_bg_color(color(ACCENT), lv.PART.INDICATOR | lv.STATE.CHECKED)
     sw.set_style_bg_color(color(TEXT), lv.PART.KNOB)
     sw.set_style_pad_all(-3, lv.PART.KNOB)
+    sw.set_style_opa(lv.OPA._50, lv.PART.MAIN | lv.STATE.DISABLED)   # locked: greyed
     if on:
         sw.add_state(lv.STATE.CHECKED)
     sw.add_event_cb(lambda e: on_change(sw.has_state(lv.STATE.CHECKED)), lv.EVENT.VALUE_CHANGED, None)

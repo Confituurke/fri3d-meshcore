@@ -138,16 +138,18 @@ MESHCORE_APP = "com.confituurke.meshcore"
 NICKNAME_PREFS = MESHCORE_APP
 
 
-# Buzzer tunes (RTTTL), one per kind of traffic, short so they never overlap the next one.
+# Buzzer sounds (RTTTL): one short beep per event, its pitch telling what came in.
 TUNES = {
-    "channel": "channel:d=16,o=6,b=200:c,e",
-    "dm": "direct:d=16,o=6,b=200:e,g,8c7",
-    "advert": "advert:d=32,o=7,b=200:c",
-    "mention": "mention:d=16,o=7,b=200:c,p,c,p,c",
-    "test": "test:d=8,o=6,b=180:c,e,g,4c7",
+    "mention": "mention:d=16,o=7,b=180:c",  # highest: you were named in a channel
+    "dm": "direct:d=16,o=6,b=180:a",       # high: someone wrote to you
+    "channel": "channel:d=16,o=6,b=180:e",  # middle: a channel message
+    "advert": "advert:d=32,o=5,b=180:c",    # low and shorter: a node announced itself
+    "test": "test:d=8,o=6,b=180:c",
 }
-TUNE_GAP_MS = 3000          # at most one tune this often (a burst of packets gets one sound)
-SOUND_DEFAULTS = {"enabled": False, "channel": True, "dm": True, "mention": True, "advert": False}
+TUNE_GAP_MS = 3000          # at most one beep this often (a burst of packets gets one sound)
+SOUND_DEFAULTS = {"enabled": False, "all": False, "channel": True, "dm": True, "mention": True,
+                  "advert": False}
+SOUND_KINDS = ("channel", "mention", "dm", "advert")
 DEFAULT_QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")
 MAX_QUICK_REPLIES = 8
 MAX_QUICK_REPLY_LEN = 40
@@ -1447,7 +1449,7 @@ class MeshCoreManager:
         self._add_message(decoded["channel"], msg)
         self._bump_unread(decoded["channel"], mention=self._mentions_us(msg["text"]))
         self._notify("message", (decoded["channel"], msg))
-        self._chime("mention" if self._mentions_us(msg["text"]) else "channel")
+        self._chime("mention" if self._mentions_us(msg["text"]) else "channel", decoded["channel"])
         self._post_notification(decoded["channel"], msg)
         return True
 
@@ -1537,7 +1539,7 @@ class MeshCoreManager:
         else:
             print("MeshCore DM <%s>: %s  (%s)" % (name, msg["text"], meta))
             self._add_dm(pub_hex, msg)
-            self._chime("dm")
+            self._chime("dm", pub_hex)
             self._bump_unread(pub_hex)
             self._notify("dm", (pub_hex, msg))
             self._post_dm_notification(pub_hex, name, msg)
@@ -1921,16 +1923,51 @@ class MeshCoreManager:
         self._sound_cache = cur
         return cur
 
-    def _chime(self, kind):
-        """Sound the buzzer for an incoming channel message, direct message or advert, if
-        the settings ask for it and no tune sounded in the last TUNE_GAP_MS."""
-        cfg = getattr(self, "_sound_cache", None)
-        if cfg is None:
-            cfg = self._sound_cache = self.sound_settings()
-        if kind == "mention" and not cfg.get("mention"):
-            kind = "channel"          # a mention is still a channel message
-        if not cfg["enabled"] or not cfg.get(kind):
+    def sound_override(self, key):
+        """"on", "off" or "default" (follow the settings) for a channel name or contact key."""
+        return self._overrides().get(key, "default")
+
+    def set_sound_override(self, key, mode):
+        ov = dict(self._overrides())
+        if mode in ("on", "off"):
+            ov[key] = mode
+        else:
+            ov.pop(key, None)
+        try:
+            ed = self._editor()
+            ed.put_dict("sound_overrides", ov)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: sound override error:", repr(e))
+        self._override_cache = ov
+
+    def _overrides(self):
+        ov = getattr(self, "_override_cache", None)
+        if ov is None:
+            try:
+                from mpos import SharedPreferences
+                ov = SharedPreferences(NICKNAME_PREFS).get_dict("sound_overrides", {}) or {}
+            except Exception:
+                ov = {}
+            self._override_cache = ov
+        return ov
+
+    def _chime(self, kind, key=None):
+        """Beep for an incoming channel message, direct message or advert: a per-channel or
+        per-contact override wins ("on" even with the buzzer off, "off" always), otherwise
+        the settings decide (buzzer on, and All or this kind chosen). At most one beep per
+        TUNE_GAP_MS."""
+        mode = self._overrides().get(key) if key is not None else None
+        if mode == "off":
             return
+        if mode != "on":
+            cfg = getattr(self, "_sound_cache", None)
+            if cfg is None:
+                cfg = self._sound_cache = self.sound_settings()
+            if kind == "mention" and not (cfg["all"] or cfg.get("mention")):
+                kind = "channel"          # a mention is still a channel message
+            if not cfg["enabled"] or not (cfg["all"] or cfg.get(kind)):
+                return
         now = self._now_ms()
         last = getattr(self, "_last_tune_ms", None)
         if last is not None and tdiff(now, last) < TUNE_GAP_MS:
@@ -2185,7 +2222,7 @@ class MeshCoreManager:
                "incoming": True, "author": prefix}
         if not self._dup_message(("room", room_hex, prefix, text), msg["ts"]):
             self._add_dm(room_hex, msg)
-            self._chime("dm")
+            self._chime("dm", room_hex)
             self._bump_unread(room_hex)
             self._notify("dm", (room_hex, msg))
             self._post_dm_notification(room_hex, contact.get("name") or room_hex[:8], msg)

@@ -88,8 +88,8 @@ class SettingsTab(Tab):
             row = T.row(self._sound_rows, lv.pct(100), 52, 8)
             T.divider(row, lv.BORDER_SIDE.TOP)
             T.label(row, text, 16).set_flex_grow(1)
-            on = all(cfg[k] for k, _ in self._KINDS) if key == "all" else cfg[key]
-            self._sound[key] = T.switch(row, on, lambda v, k=key: self._set_kind(k, v))
+            self._sound[key] = T.switch(row, cfg[key], lambda v, k=key: self._set_kind(k, v))
+        self._show_kinds(cfg)
         T.SettingRow(self._sound_rows, "Play a test sound", None, self.mgr.test_sound, chevron=False)
         if not self.mgr.has_buzzer():
             T.label(self._sound_rows, "This device has no buzzer the app can use.", 13, col=T.MUTED)
@@ -106,13 +106,19 @@ class SettingsTab(Tab):
         self._show_sound_rows(on)
 
     def _set_kind(self, key, on):
-        if key == "all":
-            cfg = self.mgr.set_sound_settings(**{k: on for k, _ in self._KINDS})
-        else:
-            cfg = self.mgr.set_sound_settings(**{key: on})
+        self._show_kinds(self.mgr.set_sound_settings(**{key: on}))
+
+    def _show_kinds(self, cfg):
+        """With All on, every kind sounds: their switches show on and are locked; with All
+        off they show (and edit) the own choice, which All leaves untouched."""
+        self._check(self._sound["all"], cfg["all"])
         for k, _ in self._KINDS:
-            self._check(self._sound[k], cfg[k])
-        self._check(self._sound["all"], all(cfg[k] for k, _ in self._KINDS))
+            sw = self._sound[k]
+            self._check(sw, cfg["all"] or cfg[k])
+            if cfg["all"]:
+                sw.add_state(lv.STATE.DISABLED)
+            else:
+                sw.remove_state(lv.STATE.DISABLED)
 
     @staticmethod
     def _check(sw, on):

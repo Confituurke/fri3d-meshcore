@@ -175,16 +175,30 @@ class TestSoundSettings(unittest.TestCase):
         tab = act._tab
         self._flip(tab._sound["enabled"], True)
         self._flip(tab._sound["advert"], True)
-        self.assertTrue(self.m.sound_settings()["advert"])
-        self.assertTrue(tab._sound["all"].has_state(lv.STATE.CHECKED))
         self._flip(tab._sound["channel"], False)
-        self.assertFalse(tab._sound["all"].has_state(lv.STATE.CHECKED))
+        st = self.m.sound_settings()
+        self.assertTrue(st["advert"] and not st["channel"] and not st["all"], st)
+        # All: every kind sounds; the own choices stay, their switches show on and are locked
         self._flip(tab._sound["all"], True)
         st = self.m.sound_settings()
-        self.assertTrue(st["channel"] and st["dm"] and st["advert"], st)
+        self.assertTrue(st["all"] and not st["channel"], st)
+        for k in ("channel", "dm", "mention", "advert"):
+            self.assertTrue(tab._sound[k].has_state(lv.STATE.CHECKED), k)
+            self.assertTrue(tab._sound[k].has_state(lv.STATE.DISABLED), k)
+        # All off: back to the own choices, unlocked
         self._flip(tab._sound["all"], False)
-        st = self.m.sound_settings()
-        self.assertFalse(st["channel"] or st["dm"] or st["advert"], st)
+        self.assertFalse(self.m.sound_settings()["all"])
+        self.assertFalse(tab._sound["channel"].has_state(lv.STATE.CHECKED))
+        self.assertTrue(tab._sound["advert"].has_state(lv.STATE.CHECKED))
+        self.assertFalse(tab._sound["channel"].has_state(lv.STATE.DISABLED))
+
+    def test_all_survives_reopening_settings(self):
+        self.m.set_sound_settings(enabled=True, all=True, channel=False)
+        act = mc_fixtures.open_app(tab=3)
+        tab = act._tab
+        self.assertTrue(tab._sound["all"].has_state(lv.STATE.CHECKED))
+        self.assertTrue(tab._sound["channel"].has_state(lv.STATE.CHECKED))
+        self.assertTrue(tab._sound["channel"].has_state(lv.STATE.DISABLED))
 
     def test_test_sound(self):
         rec = mc_fixtures.Recorder(self.m, "test_sound")
@@ -222,20 +236,69 @@ class TestContactAndReplySettings(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Mentions"))
         self.assertTrue("mention" in act._tab._sound)
 
-    def test_edit_quick_replies_and_use_them(self):
+    def _open_replies(self):
         mc_fixtures.open_app(tab=3)
         self.assertTrue(click_label("Quick replies"))
         wait_for_render(20)
         page = mpos.ui.screen_stack[-1][0]
         self.assertEqual(type(page).__name__, "QuickRepliesActivity")
-        page._fields[0].set_text("wilco")
-        page._fields[1].set_text("")
+        return page
+
+    def test_replies_are_listed_and_removed_with_their_cross(self):
+        page = self._open_replies()
+        for text in ("copy", "on my way", "ETA 10 min", "signal report"):
+            self.assertIsNotNone(find_label_with_text(lv.screen_active(), text), text)
+        page._rows[1].remove.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(self.m.quick_replies(), ["copy", "ETA 10 min", "signal report"])
+        self.assertIsNone(find_label_with_text(lv.screen_active(), "on my way"))
+
+    def test_edit_a_reply(self):
+        self._open_replies()
+        self.assertTrue(click_label("copy"))
+        wait_for_render(20)
+        edit = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(edit).__name__, "QuickReplyEditActivity")
+        self.assertEqual(edit._text.get_text(), "copy")
+        edit._text.set_text("wilco")
         self.assertTrue(click_label("Save"))
         wait_for_render(20)
-        self.assertEqual(self.m.quick_replies(), ["wilco", "ETA 10 min", "signal report"])
+        self.assertEqual(self.m.quick_replies()[0], "wilco")
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "wilco"))
         mc_fixtures.open_thread("channel", "Public")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "wilco"))
 
+    def test_remove_from_the_edit_page(self):
+        self._open_replies()
+        self.assertTrue(click_label("signal report"))
+        wait_for_render(20)
+        self.assertTrue(click_label("Remove"))
+        wait_for_render(20)
+        self.assertEqual(self.m.quick_replies(), ["copy", "on my way", "ETA 10 min"])
+
+    def test_add_a_reply_up_to_eight(self):
+        page = self._open_replies()
+        self.assertTrue(click_label("Add quick reply"))
+        wait_for_render(20)
+        edit = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(edit._text.get_text(), "")
+        self.assertIsNone(find_label_with_text(lv.screen_active(), "Remove"))
+        edit._text.set_text("QRV")
+        self.assertTrue(click_label("Save"))
+        wait_for_render(20)
+        self.assertEqual(self.m.quick_replies()[-1], "QRV")
+        self.m.set_quick_replies(["r%d" % i for i in range(8)])
+        page.refresh()
+        wait_for_render(5)
+        self.assertTrue(page._add.has_flag(lv.obj.FLAG.HIDDEN))
+
+    def test_an_empty_edit_does_not_add(self):
+        self._open_replies()
+        self.assertTrue(click_label("Add quick reply"))
+        wait_for_render(20)
+        self.assertTrue(click_label("Save"))
+        wait_for_render(20)
+        self.assertEqual(len(self.m.quick_replies()), 4)
 
 if __name__ == "__main__":
     unittest.main()

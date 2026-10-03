@@ -49,7 +49,8 @@ def _dm(env, m, text, ts=1790000000):
 
 def test_off_by_default():
     env, m, played = _setup()
-    _assert(m.sound_settings() == {"enabled": False, "channel": True, "dm": True, "mention": True, "advert": False},
+    _assert(m.sound_settings() == {"enabled": False, "all": False, "channel": True, "dm": True,
+                                   "mention": True, "advert": False},
             m.sound_settings())
     m._ingest(_group("Sam", "hi", 1790000000), rssi=-90, snr=4)
     _assert(played == [], played)
@@ -59,7 +60,8 @@ def test_settings_persist():
     env, m, played = _setup()
     m.set_sound_settings(enabled=True, advert=True, channel=False)
     m2 = fake_mpos.new_manager(env)
-    _assert(m2.sound_settings() == {"enabled": True, "channel": False, "dm": True, "mention": True, "advert": True},
+    _assert(m2.sound_settings() == {"enabled": True, "all": False, "channel": False, "dm": True,
+                                    "mention": True, "advert": True},
             m2.sound_settings())
 
 
@@ -106,10 +108,46 @@ def test_no_sound_while_a_tune_is_playing_or_just_played():
     _assert(played == ["channel", "channel"], played)
 
 
-def test_tunes_differ_per_kind():
+def test_each_kind_is_one_short_beep_of_its_own_pitch():
     import meshcore_manager as mm
-    tunes = [mm.TUNES[k] for k in ("channel", "dm", "advert", "test")]
-    _assert(len(set(tunes)) == 4, tunes)
+    notes = []
+    for k in ("channel", "mention", "dm", "advert"):
+        name, defaults, body = mm.TUNES[k].split(":")
+        _assert("," not in body, "one note only: %s" % mm.TUNES[k])
+        notes.append(body.strip())
+    _assert(len(set(mm.TUNES[k].split(":")[2] + mm.TUNES[k].split(":")[1] for k in
+                    ("channel", "mention", "dm", "advert"))) == 4, notes)
+
+
+def test_all_covers_every_kind_and_keeps_the_own_choice():
+    env, m, played = _setup()
+    m.set_sound_settings(enabled=True, channel=False, dm=True, advert=False)
+    m.set_sound_settings(all=True)
+    _, raw = fake_mpos.advert_frame(bytes([9]) * 32, "Robin", 1790000000)
+    m._ingest(raw, rssi=-90, snr=4)
+    _assert(played == ["advert"], played)
+    m.set_sound_settings(all=False)                 # back to the own choice
+    st = m.sound_settings()
+    _assert(not st["channel"] and st["dm"] and not st["advert"], st)
+
+
+def test_per_channel_and_contact_override():
+    env, m, played = _setup()
+    m.set_sound_settings(enabled=True, channel=True)
+    m.set_sound_override("Public", "off")           # force off, whatever the settings say
+    m._ingest(_group("Sam", "hi", 1790000000), rssi=-90, snr=4)
+    _assert(played == [], played)
+    _assert(m.sound_override("Public") == "off")
+    m.set_sound_settings(enabled=False)
+    peer = fake_mpos.with_peer(env, m)[0].hex()
+    m.set_sound_override(peer, "on")                # force on, even with the buzzer off
+    env.now_ms += 5000
+    m._ingest(_dm(env, m, "hello"), rssi=-90, snr=4)
+    _assert(played == ["dm"], played)
+    m.set_sound_override(peer, "default")
+    _assert(m.sound_override(peer) == "default")
+    m2 = fake_mpos.new_manager(env)
+    _assert(m2.sound_override("Public") == "off", "overrides are kept")
 
 
 if __name__ == "__main__":
