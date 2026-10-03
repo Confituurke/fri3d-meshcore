@@ -12,8 +12,7 @@ import ui_model
 import ui_theme as T
 from meshcore_manager import MeshCoreManager
 
-MAX_BUBBLES = 50
-FIRST_BUBBLES = 25          # shown on opening; "Show earlier messages" loads up to MAX_BUBBLES
+PAGE = 25                   # bubbles shown on opening; "Show earlier messages" adds a page
 BUBBLE_MAX_W = 360
 
 
@@ -118,7 +117,7 @@ class ThreadActivity(Activity):
         self.mgr = MeshCoreManager.get_instance()
         self._tz = T.tz_offset_s()
         self._bubbles = {}            # id(msg) -> _Bubble
-        self._limit = FIRST_BUBBLES
+        self._limit = PAGE
         self._earlier = None
         self._divider = None
         scr = T.make_screen()
@@ -214,7 +213,7 @@ class ThreadActivity(Activity):
             self.list.get_child(n - 1).scroll_to_view_recursive(False)
 
     def show_earlier(self):
-        self._limit = MAX_BUBBLES
+        self._limit += PAGE
         self._bubbles = {}
         self._divider = None
         self._earlier = None
@@ -235,7 +234,7 @@ class ThreadActivity(Activity):
     def refresh(self, scroll=True):
         all_msgs = self.messages()
         msgs = all_msgs[-self._limit:]
-        if len(all_msgs) > len(msgs) and self._limit < MAX_BUBBLES and self._earlier is None:
+        if len(all_msgs) > len(msgs) and self._earlier is None:
             r = T.row(self.list, lv.pct(100), lv.SIZE_CONTENT, 0, lv.FLEX_ALIGN.CENTER)
             T.quick_chip(r, "Show earlier messages", self.show_earlier)
             self._earlier = r

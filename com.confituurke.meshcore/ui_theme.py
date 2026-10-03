@@ -267,6 +267,9 @@ def scroll_area(parent, pad_hor=0, gap=0):
     a = column(parent, W, 1, gap)
     a.set_flex_grow(1)
     a.add_flag(lv.obj.FLAG.SCROLLABLE)
+    # pressable, so a drag that starts on a plain child (a bubble, a label) scrolls the area:
+    # LVGL looks for the scrollable object upwards from the pressed one
+    a.add_flag(lv.obj.FLAG.CLICKABLE)
     a.set_scroll_dir(lv.DIR.VER)
     a.set_scrollbar_mode(lv.SCROLLBAR_MODE.ACTIVE)
     a.set_style_pad_hor(pad_hor, lv.PART.MAIN)

@@ -96,9 +96,50 @@ class TestThreads(unittest.TestCase):
         self.assertIsNone(find_label_with_text(lv.screen_active(), "msg 0"))
         self.assertTrue(click_label("Show earlier messages"))
         wait_for_render(10)
-        self.assertEqual(len(act._bubbles), 42)            # 40 + the 2 seeded ones, under 50
+        self.assertEqual(len(act._bubbles), 42)            # 40 + the 2 seeded ones: one page
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "msg 0"))
         self.assertIsNone(find_label_with_text(lv.screen_active(), "Show earlier messages"))
+
+
+    def test_a_drag_on_a_bubble_scrolls_the_thread(self):
+        # LVGL scrolls the first scrollable object up from the one under the finger; with
+        # nothing pressable under it, the press lands on the screen and nothing scrolls
+        import meshcore_manager as mm
+        now = mm.unix_time()
+        for i in range(30):
+            self.m._add_message("Public", {"ts": now - 400 + i, "sender": "Sam",
+                                           "text": "msg %d" % i, "incoming": True})
+        act = mc_fixtures.open_thread("channel", "Public")
+        view = lv.area_t()
+        act.list.get_coords(view)
+        a = lv.area_t()
+        for b in act._bubbles.values():            # one that is in view
+            b.obj.get_coords(a)
+            if a.y1 >= view.y1 and a.y2 <= view.y2:
+                break
+        p = lv.point_t()
+        p.x, p.y = (a.x1 + a.x2) // 2, (a.y1 + a.y2) // 2
+        hit = lv.indev_search_obj(lv.screen_active(), p)
+        self.assertIsNotNone(hit)
+        while hit is not None and not hit.has_flag(lv.obj.FLAG.SCROLLABLE):
+            hit = hit.get_parent()
+        self.assertTrue(hit is not None and hit == act.list)
+
+    def test_earlier_messages_load_a_page_at_a_time(self):
+        import meshcore_manager as mm
+        now = mm.unix_time()
+        for i in range(80):
+            self.m._add_message("Public", {"ts": now - 400 + i, "sender": "Sam",
+                                           "text": "msg %d" % i, "incoming": True})
+        act = mc_fixtures.open_thread("channel", "Public")
+        total = len(self.m.get_messages("Public"))
+        counts = [len(act._bubbles)]
+        while click_label("Show earlier messages"):
+            wait_for_render(10)
+            counts.append(len(act._bubbles))
+        self.assertEqual(counts[0], 25)
+        self.assertEqual(counts[-1], total)
+        self.assertTrue(len(counts) >= 3, counts)
 
 
 if __name__ == "__main__":
