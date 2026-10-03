@@ -31,7 +31,9 @@ class SettingsTab(Tab):
         self._name_row = T.SettingRow(card, "Name", self.mgr.nickname(),
                                       lambda: self._open(settings_pages.NameActivity), first=True)
         pub, _ = self.mgr.get_identity()
-        T.SettingRow(card, "Node ID", pub.hex()[:8].upper() if pub else "—")
+        self._key_row = T.SettingRow(card, "Public key",
+                                     pub.hex()[:8].upper() + "\u2026" if pub else "\u2014",
+                                     lambda: self._open(settings_pages.IdentityActivity))
 
         T.section_label(body, "Radio")
         card = self._card(body)
@@ -189,6 +191,9 @@ class SettingsTab(Tab):
 
     def on_resume(self):
         self._name_row.value.set_text(self.mgr.nickname())
+        pub, _ = self.mgr.get_identity()
+        if pub:
+            self._key_row.value.set_text(pub.hex()[:8].upper() + "\u2026")
         self._preset_row.value.set_text(self._preset_text())
         self._hash_row.value.set_text(self._hash_text())
         self._regions_row.value.set_text(self._regions_text())

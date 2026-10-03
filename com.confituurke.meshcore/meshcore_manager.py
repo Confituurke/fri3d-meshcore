@@ -613,6 +613,45 @@ class MeshCoreManager:
         self._notify("identity", pub)
         return pub
 
+    def new_identity(self):
+        """Replace our key pair. Everything derived from the old key goes: the secrets shared
+        with contacts and nodes, repeater logins, messages still being retried. A name made
+        from the old key ("MC-29EE") follows the new one; a chosen name stays. Returns the
+        new public key, or None."""
+        old_pub, _ = self.get_identity()
+        auto = old_pub is not None and self._nick == "MC-%s" % old_pub.hex()[:4].upper()
+        pub = self.generate_identity()
+        if pub is None:
+            return None
+        for c in self._contacts.values():
+            c["secret"] = None
+        for n in self._nodes.values():
+            n["secret"] = None
+        self._sessions = {}
+        self._retries = [r for r in self._retries if "secret" not in r]
+        if auto:
+            self._nick = ""
+            self._name_from_identity(pub)
+        return pub
+
+    def export_identity(self, folder="/sdcard"):
+        """Write our name and key pair to FOLDER/meshcore-identity-<id>.json. Returns
+        (True, path) or (False, why)."""
+        import json
+        pub, prv = self.get_identity()
+        if pub is None:
+            return (False, "no identity yet")
+        path = "%s/meshcore-identity-%s.json" % (folder.rstrip("/"), pub.hex()[:8])
+        data = {"name": self.nickname(), "public_key": pub.hex(), "private_key": prv.hex(),
+                "exported": self._timestamp()}
+        try:
+            with open(path, "w") as f:
+                f.write(json.dumps(data))
+        except OSError as e:
+            return (False, "could not write %s (%s)" % (path, "no SD card" if e.args and
+                                                         e.args[0] in (19, 2) else e))
+        return (True, path)
+
     def _name_from_identity(self, pub):
         """Give an unnamed node a name derived from its brand-new key (MC-D5E4)."""
         current = self._nick

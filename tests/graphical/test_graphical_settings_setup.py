@@ -119,8 +119,11 @@ class TestSettings(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Indy two"))
 
     def test_settings_channel_row_opens_channel_info(self):
-        mc_fixtures.open_app(tab="Settings")
-        self.assertTrue(click_label("Public"))
+        act = mc_fixtures.open_app(tab="Settings")
+        card = act._tab._channels
+        rows = [card.get_child(i) for i in range(card.get_child_count())]
+        public = [r for r in rows if r.get_child_count() and r.get_child(0).get_text() == "Public"]
+        public[0].send_event(lv.EVENT.CLICKED, None)
         wait_for_render(20)
         self.assertEqual(mc_fixtures.stack_names()[-1], "ChannelInfoActivity")
 

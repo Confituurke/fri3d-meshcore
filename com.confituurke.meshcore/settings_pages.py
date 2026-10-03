@@ -377,3 +377,88 @@ class AppearanceActivity(Activity):
         T.fill(self.scr, T.BG)
         self.scr.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
         self.build()
+
+
+def _grouped(hexstr, group=8, per_line=4):
+    """Hex in groups of `group`, `per_line` groups a line: easier to read and compare."""
+    parts = [hexstr[i:i + group] for i in range(0, len(hexstr), group)]
+    return "\n".join(" ".join(parts[i:i + per_line]) for i in range(0, len(parts), per_line))
+
+
+class IdentityActivity(Activity):
+    """Our key pair: the public key in full, the private key on request, export to the SD
+    card, and replacing the identity (asked twice)."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        self.scr = T.make_screen()
+        self.reveal = False
+        self.status_text = ""
+        self.build()
+        self.setContentView(self.scr)
+
+    def build(self):
+        T.HeaderSub(self.scr, "Identity", back=self.finish)
+        body = T.scroll_area(self.scr, 14, 10)
+        body.set_style_pad_ver(8, lv.PART.MAIN)
+        pub, prv = self.mgr.get_identity()
+        T.section_label(body, "Public key")
+        card = T.card(body, filled=True, pad_ver=12, pad_hor=14, gap=6)
+        self.pub = T.label(card, _grouped(pub.hex().upper()) if pub else "none yet", 15, mono=True)
+        if pub:
+            T.label(card, "Node ID %02X: the first byte, which paths and hashes use." % pub[0],
+                    13, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        T.section_label(body, "Private key")
+        card = T.card(body, filled=True, pad_ver=12, pad_hor=14, gap=6)
+        if self.reveal and prv:
+            self.prv = T.label(card, _grouped(prv.hex().upper()), 13, mono=True)
+            T.label(card, "Anyone with this key can send as you. Keep it secret.", 13,
+                    col=T.WARN, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        else:
+            self.prv = T.label(card, "Hidden", 15, col=T.MUTED)
+        T.button(body, "Hide private key" if self.reveal else "Reveal private key",
+                 self.toggle, kind="outline", h=48, width=lv.pct(100))
+        T.button(body, "Export to SD card", self.export, kind="outline", h=48,
+                 width=lv.pct(100))
+        self.status = T.label(body, self.status_text, 13, col=T.MUTED,
+                              long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        b = T.button(body, "New identity", self.ask_new, kind="outline", h=48,
+                     width=lv.pct(100))
+        T.outline(b, T.FAIL_TEXT, 12, 2)
+
+    def rebuild(self):
+        self.scr.clean()
+        self.build()
+
+    def toggle(self):
+        self.reveal = not self.reveal
+        self.rebuild()
+
+    def export(self):
+        ok, info = self.mgr.export_identity("/sdcard")
+        self.status_text = ("Saved to %s. It holds your private key: keep the card safe."
+                            % info) if ok else info
+        self.rebuild()
+
+    def ask_new(self):
+        self.sheet = T.ActionSheet(
+            "Make a new identity?",
+            [("Make a new identity", self.ask_again, "danger"), ("Cancel", lambda: None)],
+            "Others know you by this key. With a new one you are a new node to them.")
+
+    def ask_again(self):
+        self.sheet = T.ActionSheet(
+            "Really sure?",
+            [("Yes, replace my identity", self.replace, "danger"), ("Cancel", lambda: None)],
+            "The current key is gone for good unless you exported it.")
+
+    def replace(self):
+        pub = self.mgr.new_identity()
+        self.reveal = False
+        self.status_text = ("New identity %02X. Send an advert so others learn it." % pub[0]
+                            if pub else "Could not make a new key.")
+        self.rebuild()
+
+    def onPause(self, screen):
+        T.close_sheets()
+        super().onPause(screen)
