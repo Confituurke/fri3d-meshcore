@@ -26,10 +26,12 @@ except Exception as e:
 from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
                              ROUTE_TYPE_FLOOD, ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_GRP_TXT,
                              PAYLOAD_TYPE_ADVERT, PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_PATH,
-                             PAYLOAD_TYPE_ACK)
+                             PAYLOAD_TYPE_ACK, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE,
+                             PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE)
 from meshcore_channel import decode_group_text, encode_group_text, PUBLIC_CHANNEL, Channel
 from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_message,
-                             assemble_advert_payload, ADV_TYPE_CHAT, contact_share_uri)
+                             assemble_advert_payload, ADV_TYPE_CHAT, ADV_TYPE_ROOM,
+                             contact_share_uri)
 # Import siblings at module load (while the app dir is on sys.path) and reference them by
 # attribute later. A lazy `from meshcore_crypto import ...` inside a function runs after the
 # app dir has left sys.path and fails on MicroPython ("no module named ..."); an attribute
@@ -38,6 +40,7 @@ import meshcore_crypto   # noqa: F401
 import meshcore_dm       # noqa: F401
 import meshcore_radio    # noqa: F401
 import meshcore_presets  # noqa: F401
+import meshcore_server   # noqa: F401
 
 # begin() keywords for the default preset (EU/UK Narrow); bring-up uses the stored preset.
 MESHCORE_RADIO = meshcore_presets.radio_kwargs(
@@ -188,6 +191,7 @@ class MeshCoreManager:
         self._pending_acks = {}                  # ack_hex -> (pubkey_hex, msg) for sent DMs
         self._pending_order = []                 # ack_hex FIFO, to cap _pending_acks
         self._retries = []                       # unconfirmed sends awaiting an ack/echo
+        self._sessions = {}                      # repeater/room pubkey -> login + results
         self._repeater_heard = False             # heard a packet that travelled via a repeater
         self._recent = {}                        # (msg key) -> timestamp, to spot resends
         self._recent_order = []                  # key FIFO, to cap _recent
@@ -1210,6 +1214,11 @@ class MeshCoreManager:
                         self._retry_tick()
                     except Exception as e:
                         print("MeshCoreManager: retry error:", repr(e))
+                if self._sessions:
+                    try:
+                        self._server_tick()
+                    except Exception as e:
+                        print("MeshCoreManager: server tick error:", repr(e))
                 self._flush_due()
                 time.sleep(0.02)   # portable (MicroPython + CPython)
         self._worker_running = False
@@ -1259,6 +1268,10 @@ class MeshCoreManager:
         elif pkt.payload_type == PAYLOAD_TYPE_PATH and self._handle_path(pkt):
             pass
         elif pkt.payload_type == PAYLOAD_TYPE_ACK and self._handle_ack(pkt):
+            pass
+        elif pkt.payload_type == PAYLOAD_TYPE_RESPONSE and self._handle_response(pkt):
+            pass
+        elif pkt.payload_type == PAYLOAD_TYPE_TRACE and self._handle_trace(pkt):
             pass
         else:
             summary = pkt.summary()
@@ -1470,6 +1483,8 @@ class MeshCoreManager:
             return False
         pub_hex = got["pubkey"].hex()
         contact = self._contacts.get(pub_hex, {})
+        if got["txt_type"] == meshcore_dm.TXT_TYPE_SIGNED_PLAIN:
+            return self._handle_room_post(got, pkt, contact)
         name = contact.get("name") or ("%02x" % got["src_hash"])
         msg = {"ts": got["timestamp"], "sender": name, "text": got["text"],
                "rssi": rssi, "snr": pkt.snr, "hops": self._hops(pkt),
@@ -1592,6 +1607,8 @@ class MeshCoreManager:
         self._learn_path(dec)
         if dec.get("ack_hash"):
             self._mark_delivered(dec["ack_hash"], pkt.snr)
+        if dec.get("extra_type") == meshcore_server.PATH_EXTRA_RESPONSE:
+            self._on_server_reply(dec["pubkey"].hex(), dec["extra"])
         if pkt.is_route_flood():
             self._send_path_return(dec, pkt)
         return True
@@ -1765,6 +1782,246 @@ class MeshCoreManager:
         self._notify("dm", (pub_hex, msg))
         return True
 
+    # --- repeaters and room servers ---------------------------------------- #
+    def server_session(self, pubkey_hex):
+        """Login state and latest results for a repeater or room server:
+        {state: idle|pending|ok|failed, role, admin, permissions, error, pending,
+         results: {status|neighbours|telemetry|owner|ping|trace: {data, at}}}."""
+        s = self._sessions.get(pubkey_hex)
+        if s is None:
+            s = {"state": "idle", "role": None, "admin": False, "permissions": 0,
+                 "error": None, "pending": None, "results": {}}
+            self._sessions[pubkey_hex] = s
+        return s
+
+    def login(self, pubkey_hex, password=""):
+        """Log in to a repeater or room server (blank password: guest). The reply, or a
+        timeout, arrives as a "server" event. Returns (ok, err) for the sending."""
+        pub, _ = self.get_identity()
+        if pub is None:
+            return (False, "no identity")
+        if pubkey_hex not in self._contacts:
+            node = self._nodes.get(pubkey_hex) or {}
+            ok, err = self.add_contact(pubkey_hex, node.get("name"), node.get("type", 2))
+            if not ok:
+                return (False, err)
+        contact = self._contacts[pubkey_hex]
+        secret = self._node_secret(contact)
+        if secret is None:
+            return (False, "no shared secret")
+        room = contact.get("type") == ADV_TYPE_ROOM
+        payload = meshcore_server.build_login(
+            secret, pub, int(pubkey_hex[:2], 16), self._timestamp(unique=True), password,
+            contact.get("sync_since", 0) if room else None)
+        s = self.server_session(pubkey_hex)
+        s["state"] = "pending"
+        s["error"] = None
+        self._server_send(pubkey_hex, contact, PAYLOAD_TYPE_ANON_REQ, payload,
+                          {"kind": "login", "tag": None})
+        return (True, None)
+
+    _REQUESTS = {"status": meshcore_server.REQ_GET_STATUS,
+                 "neighbours": meshcore_server.REQ_GET_NEIGHBOURS,
+                 "telemetry": meshcore_server.REQ_GET_TELEMETRY,
+                 "owner": meshcore_server.REQ_GET_OWNER_INFO}
+
+    def request_server(self, pubkey_hex, kind):
+        """Ask a logged-in server for "status", "neighbours", "telemetry" or "owner"; the
+        answer lands in server_session(...)["results"][kind]. One request at a time."""
+        s = self.server_session(pubkey_hex)
+        if s["state"] != "ok":
+            return (False, "log in first")
+        contact = self._contacts.get(pubkey_hex)
+        pub, _ = self.get_identity()
+        secret = self._node_secret(contact) if contact else None
+        if secret is None or pub is None:
+            return (False, "no shared secret")
+        params = None
+        if kind == "neighbours":
+            params = meshcore_server.neighbours_params(count=20, order=2, prefix_len=4)
+        elif kind == "telemetry":
+            params = bytes([0]) + bytes(3) + self._rand4()   # 0 = every permitted kind
+        tag = self._timestamp(unique=True)
+        payload = meshcore_server.build_request(secret, pub, int(pubkey_hex[:2], 16), tag,
+                                                self._REQUESTS[kind], params)
+        s["error"] = None
+        self._server_send(pubkey_hex, contact, PAYLOAD_TYPE_REQ, payload,
+                          {"kind": kind, "tag": tag})
+        return (True, None)
+
+    def ping(self, pubkey_hex):
+        """A zero-hop trace to the node: round trip, SNR there and back."""
+        return self._send_trace(pubkey_hex, "ping", [int(pubkey_hex[:2], 16)])
+
+    def trace(self, pubkey_hex):
+        """A trace along the learned route to the node and back: SNR at every hop."""
+        contact = self._contacts.get(pubkey_hex) or {}
+        path = list(contact.get("path") or b"")
+        return self._send_trace(pubkey_hex, "trace", path + [int(pubkey_hex[:2], 16)] + path[::-1])
+
+    def _send_trace(self, pubkey_hex, kind, hashes):
+        tag = int.from_bytes(self._rand4(), "little")
+        payload = meshcore_server.build_trace(tag, 0, bytes(hashes))
+        pkt = MeshCorePacket(make_header(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TRACE),
+                             encode_path_len(0), b"", payload)
+        s = self.server_session(pubkey_hex)
+        s["error"] = None
+        airtime = self._time_on_air_ms(len(pkt.to_bytes()))
+        s["trace"] = {"kind": kind, "tag": tag, "t0": self._now_ms(), "hops": len(hashes),
+                      "deadline": self._deadline(meshcore_server.timeout_ms(airtime, len(hashes)))}
+        rec = s["trace"]
+        self._enqueue_tx(pkt.to_bytes(), on_sent=lambda ok: rec.update(t0=self._now_ms()))
+        self._notify("server", pubkey_hex)
+        return (True, None)
+
+    def _rand4(self):
+        try:
+            import os
+            return os.urandom(4)
+        except Exception:
+            return bytes(self._rand_byte() for _ in range(4))
+
+    def _deadline(self, ms):
+        # The firmware's estimate plus room for our own TX queue and duty cycle.
+        return tadd(self._now_ms(), ms + 3000)
+
+    def _server_send(self, pubkey_hex, contact, ptype, payload, pending):
+        route, path_raw, path = self._route(contact)
+        pkt = MeshCorePacket(make_header(route, ptype), path_raw, path, payload)
+        raw = pkt.to_bytes()
+        hops = (path_raw & 63) if route == ROUTE_TYPE_DIRECT else None
+        pending["deadline"] = self._deadline(
+            meshcore_server.timeout_ms(self._time_on_air_ms(len(raw)), hops))
+        self.server_session(pubkey_hex)["pending"] = pending
+        try:
+            self._remember(pkt.packet_hash())
+        except Exception:
+            pass
+        self._enqueue_tx(raw)
+        self._notify("server", pubkey_hex)
+
+    def _handle_response(self, pkt):
+        self_hash = self.node_id()
+        if self_hash is None or len(pkt.payload) < 2 or pkt.payload[0] != (self_hash & 0xFF):
+            return False
+        got = meshcore_dm.decode_envelope(pkt.payload, self_hash,
+                                          self._contact_candidates(pkt.payload[1]))
+        if got is None:
+            return False
+        return self._on_server_reply(got[0].hex(), got[1])
+
+    def _on_server_reply(self, pubkey_hex, plaintext):
+        s = self._sessions.get(pubkey_hex)
+        pending = s and s.get("pending")
+        if not pending:
+            return False
+        if pending["kind"] == "login":
+            r = meshcore_server.parse_login_reply(plaintext)
+            if r is None:
+                return False
+            s.update(state="ok", role=r["role"], admin=r["admin"], permissions=r["permissions"],
+                     server_ts=r["server_ts"], fw_level=r["fw_level"], pending=None, error=None)
+            self._note_heard_ts(r["server_ts"])
+            self._notify("server", pubkey_hex)
+            return True
+        tag, body = meshcore_server.parse_response(plaintext)
+        if tag != pending["tag"]:
+            return False                 # a late reply to an older request
+        kind = pending["kind"]
+        room = (self._contacts.get(pubkey_hex) or {}).get("type") == ADV_TYPE_ROOM
+        if kind == "status":
+            data = meshcore_server.parse_status(body, room=room)
+        elif kind == "neighbours":
+            total, rows = meshcore_server.parse_neighbours(body, prefix_len=4)
+            data = {"total": total, "rows": rows}
+        elif kind == "telemetry":
+            data = meshcore_server.parse_lpp(body)
+        else:
+            data = meshcore_server.parse_owner_info(body)
+        s["results"][kind] = {"data": data, "at": unix_time()}
+        s["pending"] = None
+        s["error"] = None
+        self._notify("server", pubkey_hex)
+        return True
+
+    def _handle_trace(self, pkt):
+        if len(pkt.payload) < 9:
+            return False
+        try:
+            r = meshcore_server.parse_trace(pkt.payload, pkt.path, pkt.snr)
+        except Exception:
+            return False
+        for pubkey_hex, s in self._sessions.items():
+            t = s.get("trace")
+            if not t or t["tag"] != r["tag"]:
+                continue
+            if len(r["hop_snrs"]) < len(r["hashes"]):
+                return True              # still on its way: a repeater passing it on
+            r["rtt_ms"] = tdiff(self._now_ms(), t["t0"])
+            s["results"][t["kind"]] = {"data": r, "at": unix_time()}
+            s["trace"] = None
+            self._notify("server", pubkey_hex)
+            return True
+        return False
+
+    def _server_tick(self):
+        now = self._now_ms()
+        for pubkey_hex, s in self._sessions.items():
+            name = (self._contacts.get(pubkey_hex) or {}).get("name") or pubkey_hex[:8]
+            p = s.get("pending")
+            if p and tdiff(now, p["deadline"]) > 0:
+                s["pending"] = None
+                s["error"] = "no answer from %s" % name
+                if p["kind"] == "login":
+                    s["state"] = "failed"
+                self._notify("server", pubkey_hex)
+            t = s.get("trace")
+            if t and tdiff(now, t["deadline"]) > 0:
+                s["trace"] = None
+                s["error"] = "no answer to the %s" % t["kind"]
+                self._notify("server", pubkey_hex)
+
+    def _handle_room_post(self, got, pkt, contact):
+        """A post a room server pushes to us: timestamp, author key prefix, text. Acked with a
+        hash over the post and OUR key (BaseChatMesh, TXT_TYPE_SIGNED_PLAIN)."""
+        import hashlib
+        core = got["core"]
+        if len(core) < 9:
+            return False
+        room_hex = got["pubkey"].hex()
+        prefix = core[5:9].hex()
+        try:
+            text = core[9:].decode("utf-8")
+        except Exception:
+            text = "".join("\\x%02x" % b for b in core[9:])
+        author = None
+        for pk, n in list(self._contacts.items()) + list(self._nodes.items()):
+            if pk.startswith(prefix):
+                author = n.get("name")
+                break
+        pub, _ = self.get_identity()
+        if pub is not None and prefix == bytes(pub[:4]).hex():
+            author = self.nickname()
+        msg = {"ts": got["timestamp"], "sender": author or prefix.upper(), "text": text,
+               "snr": pkt.snr, "hops": self._hops(pkt), "rx_ms": self._now_ms(),
+               "incoming": True, "author": prefix}
+        if not self._dup_message(("room", room_hex, prefix, text), msg["ts"]):
+            self._add_dm(room_hex, msg)
+            self._bump_unread(room_hex)
+            self._notify("dm", (room_hex, msg))
+            self._post_dm_notification(room_hex, contact.get("name") or room_hex[:8], msg)
+        if got["timestamp"] > contact.get("sync_since", 0):
+            contact["sync_since"] = got["timestamp"]
+            self._save_contacts()
+        if pub is not None:
+            got = dict(got)
+            got["ack_hash"] = hashlib.sha256(bytes(core) + bytes(pub)).digest()[:4]
+            try:
+                self._send_ack(got, pkt)
+            except Exception as e:
+                print("MeshCore: room ack error:", repr(e))
+        return True
+
     def send_dm(self, pubkey_hex, text):
         """Encrypt + flood a direct text message to a contact. Returns (ok, err)."""
         text = (text or "").strip()
@@ -1868,7 +2125,7 @@ class MeshCoreManager:
             "id": pubkey_hex[0:2],
             "name": name,
             "type": node_type,
-            "type_name": "chat",
+            "type_name": {2: "rptr", 3: "room", 4: "sensor"}.get(node_type, "chat"),
             "secret": None,
             "rssi": node.get("rssi"),
             "seq": node.get("seq", 0),
@@ -1917,12 +2174,13 @@ class MeshCoreManager:
                     "id": pub_hex[0:2],
                     "name": entry.get("name") or pub_hex[0:2],
                     "type": entry.get("type", ADV_TYPE_CHAT),
-                    "type_name": "chat",
+                    "type_name": {2: "rptr", 3: "room", 4: "sensor"}.get(entry.get("type"), "chat"),
                     "secret": None,
                     "rssi": None,
                     "seq": 0,
                     "path": self._unhex(entry.get("path")),
                     "path_raw": entry.get("path_raw", 0),
+                    "sync_since": entry.get("sync_since", 0),
                 }
                 self._dm_messages[pub_hex] = self._clean_history(histories.get(pub_hex), dm=True)
             except Exception as e:
@@ -1934,6 +2192,8 @@ class MeshCoreManager:
             data = {}
             for h, c in self._contacts.items():
                 entry = {"name": c["name"], "type": c.get("type", ADV_TYPE_CHAT)}
+                if c.get("sync_since"):                   # room: newest post we have
+                    entry["sync_since"] = c["sync_since"]
                 path = c.get("path")
                 if path:                                  # the learned direct route
                     entry["path"] = path.hex()

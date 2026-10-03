@@ -195,13 +195,34 @@ def _parse_path(pubkey, dst_hash, src_hash, pt):
     plen = hash_count * hash_size
     i = 1 + plen
     result = {"pubkey": bytes(pubkey), "src_hash": src_hash,
-              "path": bytes(pt[1:1 + plen]), "path_len_raw": path_len_raw, "ack_hash": None}
+              "path": bytes(pt[1:1 + plen]), "path_len_raw": path_len_raw, "ack_hash": None,
+              "extra_type": None, "extra": b""}
     if len(pt) > i:
-        extra_type = pt[i]
+        extra_type = pt[i] & 0x0F
         i += 1
+        if pt[i - 1] != 0xFF:                          # 0xFF marks "no extra"
+            result["extra_type"] = extra_type
+            result["extra"] = bytes(pt[i:])
         if extra_type == PATH_EXTRA_ACK and len(pt) >= i + 4:
             result["ack_hash"] = bytes(pt[i:i + 4])   # match on the first 4 bytes
     return result
+
+
+def decode_envelope(payload, self_hash, candidates):
+    """(pubkey, plaintext) of a dst+src+MAC+ciphertext payload addressed to us (RESPONSE,
+    REQ), or None. `candidates` = (pubkey, secret) pairs."""
+    payload = bytes(payload)
+    if len(payload) < 2 + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE or payload[0] != (self_hash & 0xFF):
+        return None
+    mac = payload[2:2 + CIPHER_MAC_SIZE]
+    ciphertext = payload[2 + CIPHER_MAC_SIZE:]
+    for pubkey, secret in candidates:
+        if pubkey[0] != payload[1]:
+            continue
+        plaintext = mac_then_decrypt(secret, mac, ciphertext)
+        if plaintext is not None:
+            return bytes(pubkey), plaintext
+    return None
 
 
 def decode_ack(payload):
@@ -219,7 +240,10 @@ def _parse_dm_plaintext(pubkey, dst_hash, src_hash, plaintext):
     txt_type = flags >> 2
     attempt = flags & 3
     body = plaintext[5:]
-    nul = body.find(b"\x00")
+    # The text ends at the first NUL (padding). A signed message starts with the author's
+    # 4-byte key prefix, which may hold zero bytes: the text is measured after it.
+    start = 4 if txt_type == TXT_TYPE_SIGNED_PLAIN else 0
+    nul = body.find(b"\x00", start)
     if nul >= 0:
         body = body[:nul]
     # ack hash the sender expects back: over timestamp+flags+text + sender pubkey.
@@ -240,4 +264,5 @@ def _parse_dm_plaintext(pubkey, dst_hash, src_hash, plaintext):
         "text": text,
         "ack_hash": ack,
         "supported": txt_type == TXT_TYPE_PLAIN,
+        "core": bytes(core),           # timestamp + flags + text, as the sender hashed it
     }
