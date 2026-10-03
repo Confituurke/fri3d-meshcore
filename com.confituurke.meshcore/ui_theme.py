@@ -12,6 +12,8 @@ import lvgl as lv
 
 from mpos import FontManager
 
+import ui_model
+
 from ui_model import (BG, SURFACE, SURFACE2, LINE, OUTLINE, TEXT, MUTED, ACCENT,  # noqa: F401
                       OWN, OWN_TEXT, BAR, CHAN_BG, CHAN_FG, DM_BG, DM_FG, ROOM_BG,
                       DELIVERED, FAIL, FAIL_TEXT, OK, WARN, ERR)
@@ -37,6 +39,19 @@ _FILES = {
 SYMBOL_FONT = lv.font_montserrat_14
 
 _fonts = {}
+
+
+
+def _has_emoji_image(cp):
+    """Whether MicroPythonOS draws this emoji, itself or as a similar one it has."""
+    try:
+        return FontManager._get_emoji_src(cp, 16) is not None
+    except Exception:
+        return FontManager.isEmojiCodepoint(cp)
+
+
+# Emoji MicroPythonOS has no image for are left out of displayed text (see ui_model.display).
+ui_model.set_emoji_filter(_has_emoji_image)
 _styles = {}
 
 
@@ -44,14 +59,16 @@ def color(c):
     return lv.color_hex(c)
 
 
-def font(size, weight=400, mono=False):
+def font(size, weight=400, mono=False, emoji=False):
     """A bundled font. Kept per (size, weight, family): FontManager.getFont() costs more
-    than building a widget, and a font that is held stays valid (it is never destroyed)."""
-    key = (size, weight, mono)
+    than building a widget, and a font that is held stays valid (it is never destroyed).
+    emoji=True puts MicroPythonOS's emoji images in front of it, for text people wrote
+    (names, messages): node names on the mesh often carry emoji."""
+    key = (size, weight, mono, emoji)
     f = _fonts.get(key)
     if f is None:
         name = _FILES[(mono, weight)]
-        f = FontManager.getFont(size=size, ttf="M:%s/fonts/%s" % (_DIR, name))
+        f = FontManager.getFont(size=size, ttf="M:%s/fonts/%s" % (_DIR, name), emoji=emoji)
         _fonts[key] = f
     return f
 
@@ -108,10 +125,11 @@ def divider(o, side=None):
     return o
 
 
-def label(parent, text, size=16, weight=400, col=TEXT, mono=False, long_mode=None, width=None):
+def label(parent, text, size=16, weight=400, col=TEXT, mono=False, long_mode=None, width=None,
+          emoji=False):
     lb = lv.label(parent)
     lb.set_text(text)
-    lb.set_style_text_font(font(size, weight, mono), lv.PART.MAIN)
+    lb.set_style_text_font(font(size, weight, mono, emoji), lv.PART.MAIN)
     lb.set_style_text_color(color(col), lv.PART.MAIN)
     if long_mode is not None:
         lb.set_long_mode(long_mode)
@@ -218,7 +236,8 @@ class HeaderSub:
             icon_button(self.obj, "back", back)
         col = column(self.obj, 1)
         col.set_flex_grow(1)
-        self.title = label(col, title, 20, 700, long_mode=lv.label.LONG_MODE.DOTS, width=lv.pct(100))
+        self.title = label(col, title, 20, 700, long_mode=lv.label.LONG_MODE.DOTS, width=lv.pct(100),
+                           emoji=True)
         self.subtitle = label(col, subtitle or "", 12 if mono_subtitle else 14, 400, MUTED,
                               mono=mono_subtitle, long_mode=lv.label.LONG_MODE.DOTS, width=lv.pct(100))
         if not subtitle:
@@ -242,7 +261,7 @@ class HeaderCompact:
         divider(self.obj)
         self.obj.set_style_pad_right(8, lv.PART.MAIN)
         icon_button(self.obj, "back", back, 48, 44)
-        self.title = label(self.obj, title, 20, 700, long_mode=lv.label.LONG_MODE.DOTS)
+        self.title = label(self.obj, title, 20, 700, long_mode=lv.label.LONG_MODE.DOTS, emoji=True)
         self.title.set_flex_grow(1)
         self.pill = row(self.obj, lv.SIZE_CONTENT, 32, 6)
         fill(self.pill, SURFACE, 16)
@@ -387,11 +406,11 @@ class ListRow:
         text = column(self.obj, 1, lv.SIZE_CONTENT, 3)
         text.set_flex_grow(1)
         top = row(text, lv.pct(100), lv.SIZE_CONTENT, 8)
-        self.title = label(top, "", 19, 600, long_mode=lv.label.LONG_MODE.DOTS)
+        self.title = label(top, "", 19, 600, long_mode=lv.label.LONG_MODE.DOTS, emoji=True)
         self.title.set_flex_grow(1)
         self.right = label(top, "", 13, mono=True, col=MUTED)
         bottom = row(text, lv.pct(100), 24, 8)
-        self.line2 = label(bottom, "", 16, col=MUTED, long_mode=lv.label.LONG_MODE.DOTS)
+        self.line2 = label(bottom, "", 16, col=MUTED, long_mode=lv.label.LONG_MODE.DOTS, emoji=True)
         self.line2.set_flex_grow(1)
         self.badge = Badge(bottom)
         self.badge.show()

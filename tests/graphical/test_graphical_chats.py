@@ -56,6 +56,24 @@ class TestChats(unittest.TestCase):
         self.assertEqual(type(act).__name__, "ChannelChatActivity")
         self.assertEqual(act.getIntent().extras.get("channel"), "Public")
 
+    def test_names_and_messages_use_the_emoji_font(self):
+        import meshcore_manager as mm
+        self.m._add_message("Public", {"ts": mm.unix_time(), "sender": "Scribe\U0001F4DC",
+                                       "text": "hi \U0001F44D", "incoming": True})
+        act = mc_fixtures.open_app()
+        row = act._tab._rows["Public"]
+
+        def emoji_font(lb):
+            # An emoji font is MicroPythonOS's image font with the TTF as its fallback.
+            return lb.get_style_text_font(lv.PART.MAIN).fallback is not None
+
+        self.assertTrue(emoji_font(row.title))
+        self.assertTrue(emoji_font(row.line2))
+        self.assertFalse(emoji_font(row.right))          # times stay plain mono
+        mc_fixtures.open_thread("channel", "Public")
+        lb = find_label_with_text(lv.screen_active(), "hi \U0001F44D")
+        self.assertTrue(emoji_font(lb))
+
 
 if __name__ == "__main__":
     unittest.main()

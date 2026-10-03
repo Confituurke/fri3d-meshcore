@@ -41,6 +41,46 @@ def _seeded():
     return m, peer_pub.hex()
 
 
+def test_display_drops_emoji_without_an_image():
+    ui = _ui()
+    ui.set_emoji_filter(lambda cp: cp == 0x1F44D)
+    try:
+        _assert(ui.display("Scribe\U0001F4DC") == "Scribe", ui.display("Scribe\U0001F4DC"))
+        _assert(ui.display("ok \U0001F44D") == "ok \U0001F44D")
+        flag = "\U0001F1E7\U0001F1EA"           # regional indicators: the font handles flags
+        _assert(ui.display(flag + "ON1CV") == flag + "ON1CV")
+        _assert(ui.display("\U0001F6F8UFO") == "UFO")
+        _assert(ui.display("Привет") == "Привет")      # other scripts are left alone
+    finally:
+        ui.set_emoji_filter(None)
+    _assert(ui.display("Scribe\U0001F4DC") == "Scribe\U0001F4DC")     # no filter: unchanged
+
+
+def test_initials_skip_emoji():
+    ui = _ui()
+    _assert(ui.initials("\U0001F6F8UFO") == "UF", ui.initials("\U0001F6F8UFO"))
+    _assert(ui.initials("\U0001F1E7\U0001F1EA Benito") == "BE", ui.initials("\U0001F1E7\U0001F1EA Benito"))
+    _assert(ui.initials("Alex Smith") == "AS")
+
+
+def test_names_and_previews_pass_through_display():
+    m, alex = _seeded()
+    ui = _ui()
+    m.set_nickname("Kim")
+    ui.set_emoji_filter(lambda cp: False)
+    try:
+        m._add_message("Public", {"ts": NOW, "sender": "Scribe\U0001F4DC", "text": "hi",
+                                  "incoming": True})
+        row = [r for r in ui.chat_rows(m, NOW) if r["key"] == "Public"][0]
+        _assert(row["preview"] == "Scribe: hi", row)
+        nodes = [{"pubkey": "a3" * 32, "id": "a3", "type": 2, "name": "\U0001F6F8UFO", "hops": 0,
+                  "heard_ms": 0}]
+        _assert(ui.node_rows(nodes, 0)[0]["name"] == "UFO")
+        _assert(ui.node_detail(nodes[0], 0)["title"] == "UFO")
+    finally:
+        ui.set_emoji_filter(None)
+
+
 def test_chat_rows_sorted_and_filtered():
     m, alex = _seeded()
     ui = _ui()

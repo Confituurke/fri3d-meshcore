@@ -33,7 +33,7 @@ class _Bubble:
                              lv.FLEX_ALIGN.START)
         if show_sender and not own:
             name = msg.get("sender") or "?"
-            T.label(group, name, 15, 600, ui_model.sender_color(name))
+            T.label(group, ui_model.display(name), 15, 600, ui_model.sender_color(name), emoji=True)
         self.bubble = T.box(group, lv.SIZE_CONTENT, lv.SIZE_CONTENT)
         T.fill(self.bubble, T.OWN if own else T.SURFACE, 16)
         self.bubble.set_style_pad_ver(pad_ver, lv.PART.MAIN)
@@ -45,8 +45,8 @@ class _Bubble:
         T.fill(tail, T.OWN if own else T.SURFACE, 4)
         tail.add_flag(lv.obj.FLAG.IGNORE_LAYOUT)
         tail.align(lv.ALIGN.TOP_RIGHT if own else lv.ALIGN.TOP_LEFT, 13 if own else -13, -pad_ver)
-        text = T.label(self.bubble, msg.get("text", ""), 18, col=T.OWN_TEXT if own else T.TEXT,
-                       long_mode=lv.label.LONG_MODE.WRAP)
+        text = T.label(self.bubble, ui_model.display(msg.get("text", "")), 18, col=T.OWN_TEXT if own else T.TEXT,
+                       long_mode=lv.label.LONG_MODE.WRAP, emoji=True)
         text.set_style_max_width(BUBBLE_MAX_W - 26, lv.PART.MAIN)
         text.set_width(lv.SIZE_CONTENT)
         text.set_style_text_line_space(4, lv.PART.MAIN)
@@ -323,7 +323,7 @@ class DMChatActivity(ThreadActivity):
 
     def title(self):
         c = self._contact()
-        return c.get("name") or self.key()[:8]
+        return ui_model.display(c.get("name")) or self.key()[:8]
 
     def route_text(self):
         c = self._contact()

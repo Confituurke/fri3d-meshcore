@@ -82,8 +82,43 @@ def clock_text(ts, tz_s=0):
     return "%02d:%02d" % (t[3], t[4])
 
 
+_emoji_known = None     # cp -> bool, from MicroPythonOS's emoji set (ui_theme sets it)
+
+
+def set_emoji_filter(known):
+    """known(codepoint) -> True when the device has an image for that emoji; None keeps all."""
+    global _emoji_known
+    _emoji_known = known
+
+
+def _is_pictograph(cp):
+    # Emoji blocks, without the regional indicators (flags, 1F1E6-1F1FF) and the
+    # modifiers, which the emoji font already draws or hides itself.
+    if 0x1F1E6 <= cp <= 0x1F1FF or 0x1F3FB <= cp <= 0x1F3FF:
+        return False
+    return 0x1F000 <= cp <= 0x1FAFF or 0x2600 <= cp <= 0x27BF or 0x2B00 <= cp <= 0x2BFF
+
+
+def display(text):
+    """Text as the screen can show it: emoji the device has no image for are dropped
+    (the text font would draw them as empty boxes); everything else is kept."""
+    if not text or _emoji_known is None:
+        return text
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if _is_pictograph(cp) and not _emoji_known(cp):
+            continue
+        out.append(ch)
+    return "".join(out).strip() if len(out) != len(text) else text
+
+
 def initials(name):
-    words = (name or "?").split()
+    # The avatar font has no emoji: leave out pictographs and flag letters.
+    name = "".join(ch for ch in (name or "")
+                   if not _is_pictograph(ord(ch)) and not 0x1F1E6 <= ord(ch) <= 0x1F1FF
+                   and ord(ch) not in (0xFE0F, 0x200D))
+    words = (name or "?").split() or ["?"]
     if len(words) >= 2:
         return (words[0][0] + words[1][0]).upper()
     return words[0][:2].upper()
@@ -93,10 +128,10 @@ def _preview(msg, dm):
     if msg is None:
         return "No messages yet"
     if not msg.get("incoming"):
-        return "You: " + msg.get("text", "")
+        return "You: " + display(msg.get("text", ""))
     if dm:
-        return msg.get("text", "")
-    return "%s: %s" % (msg.get("sender", "?"), msg.get("text", ""))
+        return display(msg.get("text", ""))
+    return "%s: %s" % (display(msg.get("sender", "?")), display(msg.get("text", "")))
 
 
 def chat_rows(mgr, now_s, filt="all", tz_s=0):
@@ -106,14 +141,15 @@ def chat_rows(mgr, now_s, filt="all", tz_s=0):
         for name in mgr.get_channel_names():
             msgs = mgr.get_messages(name)
             last = msgs[-1] if msgs else None
-            rows.append({"key": name, "kind": "channel", "title": name, "initials": "#",
+            rows.append({"key": name, "kind": "channel", "title": display(name), "initials": "#",
                          "last": last})
     if filt != "channels":
         for c in mgr.get_contacts():
             msgs = mgr.get_dm_messages(c["pubkey"])
             last = msgs[-1] if msgs else None
-            rows.append({"key": c["pubkey"], "kind": "dm", "title": c.get("name") or c["id"],
-                         "initials": initials(c.get("name")), "last": last})
+            name = display(c.get("name")) or c["id"]
+            rows.append({"key": c["pubkey"], "kind": "dm", "title": name,
+                         "initials": initials(name), "last": last})
     for r in rows:
         last = r.pop("last")
         r["ts"] = last.get("ts", 0) if last else 0
@@ -219,7 +255,7 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
         if n.get("snr") is not None:
             meta += " · SNR " + snr_text(n["snr"])
         rows.append({"pubkey": n.get("pubkey"), "hex": (n.get("id") or "??").upper(),
-                     "kind": kind, "name": n.get("name") or "?", "age": age_text(age_s),
+                     "kind": kind, "name": display(n.get("name")) or "?", "age": age_text(age_s),
                      "age_color": _age_color(age_s), "meta": meta})
     return rows
 
@@ -256,7 +292,7 @@ def node_detail(n, now_ms):
     if n.get("lat") is not None and n.get("lon") is not None:
         fields.append(("Location", "%.4f, %.4f" % (n["lat"], n["lon"])))
     fields.append(("Signature", "verified" if n.get("verified") else "not checked"))
-    return {"title": n.get("name") or pk[:8] or "?",
+    return {"title": display(n.get("name")) or pk[:8] or "?",
             "subtitle": "%s · %s…%s" % (_KIND_WORDS.get(kind, kind), pk[:4], pk[-4:]),
             "info": lead + tail,
             "route": (lead + " via " if via else lead, via, tail),
