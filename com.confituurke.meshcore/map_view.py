@@ -63,6 +63,16 @@ def tile_style(choice=None, available=None):
     return available[0] if available else wanted
 
 
+def _credit(style):
+    """The first line of the style folder's credit.txt, else the OpenStreetMap credit."""
+    try:
+        with open("%s/%s/credit.txt" % (MAPS, style)) as f:
+            line = f.readline().strip()
+        return line or CREDIT
+    except OSError:
+        return CREDIT
+
+
 def _read_file(path):
     with open(path, "rb") as f:
         return f.read()
@@ -154,7 +164,8 @@ class MapView:
         self._me_button = None
         if controls:
             self._controls()
-        credit = T.label(self.obj, CREDIT, 11, col=T.MUTED)
+        credit = T.label(self.obj, _credit(self.style), 11, col=T.MUTED)
+        self.credit = credit
         T.fill(credit, T.BG, 6)
         credit.set_style_bg_opa(lv.OPA._70, lv.PART.MAIN)
         credit.set_style_pad_hor(6, lv.PART.MAIN)

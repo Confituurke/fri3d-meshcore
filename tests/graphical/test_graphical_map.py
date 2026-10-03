@@ -205,6 +205,23 @@ class TestMap(unittest.TestCase):
         finally:
             self.set_map("system")
 
+    def test_the_credit_line_comes_from_the_style_folder(self):
+        _mkdirs(TILES + "/topo/0/0")
+        with open(TILES + "/topo/credit.txt", "w") as f:
+            f.write("Map credit line\nlonger text\n")
+        self.map_view.MAPS = TILES
+        self.set_map("topo")
+        try:
+            act = mc_fixtures.open_app(tab="Map")
+            self.assertEqual(act._tab.view.credit.get_text(), "Map credit line")
+        finally:
+            self.set_map("system")
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+        self.map_view.MAPS = "/nonexistent/maps"
+        act = mc_fixtures.open_app(tab="Map")
+        self.assertEqual(act._tab.view.credit.get_text(), self.map_view.CREDIT)
+
     def test_node_detail_map_button_opens_the_map_on_that_node(self):
         from mpos import Intent
         from mpos.activity_navigator import ActivityNavigator
