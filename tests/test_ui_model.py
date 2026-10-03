@@ -325,5 +325,28 @@ def test_recently_heard_rows():
     _assert(ui.rx_rate_text(6.0) == "~6/min" and ui.rx_rate_text(0.4) == "~0.4/min")
 
 
+
+def test_typed_coordinates():
+    ui = _ui()
+    for text in ("50.8279, 3.2649", "50.8279 3.2649", " 50.8279,3.2649 ", "50,8279; 3,2649",
+                 "50,8279 3,2649"):
+        _assert(ui.parse_coords(text) == (50.8279, 3.2649), (text, ui.parse_coords(text)))
+    _assert(ui.parse_coords("-33.9, 151.2") == (-33.9, 151.2), "south east")
+    for text in ("", "50.8", "a, b", "50.8, 3.2, 1"):
+        _assert(ui.parse_coords(text) is None, text)
+
+
+def test_position_texts():
+    ui = _ui()
+    _assert(ui.position_text(None) == ("Not set", ""), ui.position_text(None))
+    _assert(ui.position_text({"lat": 50.8279, "lon": 3.2649, "source": "manual"})
+            == ("50.82790, 3.26490", "set by hand"), "manual")
+    _assert(ui.position_text({"lat": -33.9, "lon": 151.2, "source": "gps"})[1] == "from the GPS", "gps")
+    _assert(ui.gps_text({"enabled": False, "state": "off"}) == "Off", "off")
+    _assert(ui.gps_text({"enabled": False, "state": "absent"}) == "No GPS found, switched off", "absent")
+    _assert(ui.gps_text({"enabled": True, "state": "searching"}) == "Looking for the GPS…", "searching")
+    _assert(ui.gps_text({"enabled": True, "state": "no_fix"}) == "Waiting for a fix", "no fix")
+    _assert(ui.gps_text({"enabled": True, "state": "fix"}) == "Position from the GPS", "fix")
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

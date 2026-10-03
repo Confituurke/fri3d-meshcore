@@ -37,6 +37,8 @@ ICONS = {
     "map": (22, 2, '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>'),
     "minus": (24, 2, '<path d="M5 12h14"/>'),
     "fit": (22, 2, '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.5"/>'),
+    "me": (22, 2, '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="#fff"/>'
+                  '<path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>'),
     "kebab": (22, 0, '<g fill="#fff" stroke="none"><circle cx="12" cy="5" r="2"/>'
                      '<circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></g>'),
 }

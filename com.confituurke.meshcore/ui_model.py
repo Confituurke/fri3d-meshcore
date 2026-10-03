@@ -470,3 +470,41 @@ def recent_rows(recent):
 
 def rx_rate_text(per_min):
     return "~%d/min" % per_min if per_min >= 1 else "~%.1f/min" % per_min
+
+
+# --- own position --------------------------------------------------------- #
+
+def parse_coords(text):
+    """(lat, lon) from typed text: "50.8279, 3.2649", "50.8279 3.2649" or with decimal commas
+    "50,8279; 3,2649" / "50,8279 3,2649". None when it is not two numbers."""
+    t = text.strip()
+    if ";" in t:
+        parts = t.split(";")
+    elif t.count(",") == 1 and "." in t or t.count(",") == 1 and " " not in t:
+        parts = t.split(",")
+    else:
+        parts = t.split()
+    parts = [p.strip().replace(",", ".") for p in parts if p.strip()]
+    if len(parts) != 2:
+        return None
+    try:
+        return float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+
+
+_SOURCES = {"manual": "set by hand", "gps": "from the GPS"}
+_GPS_STATES = {"off": "Off", "absent": "No GPS found, switched off",
+               "searching": "Looking for the GPS…", "no_fix": "Waiting for a fix",
+               "fix": "Position from the GPS"}
+
+
+def position_text(pos):
+    """(coordinates, where they came from) for the Location page."""
+    if not pos:
+        return "Not set", ""
+    return "%.5f, %.5f" % (pos["lat"], pos["lon"]), _SOURCES.get(pos.get("source"), "")
+
+
+def gps_text(status):
+    return _GPS_STATES.get(status["state"], status["state"])

@@ -17,7 +17,7 @@ class MapTab(Tab):
                                      lambda pk, kind: map_view.open_node(activity, self.mgr, pk, kind))
 
     def on_event(self, event, data):
-        if event in ("node", "contacts"):
+        if event in ("node", "contacts", "position"):
             self.view.refresh_pins()
 
     def on_resume(self):

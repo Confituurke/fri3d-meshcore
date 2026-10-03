@@ -1,9 +1,10 @@
-"""Settings sub-pages: the name, a new channel and the quick replies, each with its own keyboard."""
+"""Settings sub-pages: the name, a new channel, the quick replies and our own position."""
 
 import lvgl as lv
 
 from mpos import Activity, Intent
 
+import ui_model
 import ui_theme as T
 from meshcore_manager import MeshCoreManager, MAX_QUICK_REPLIES, MAX_QUICK_REPLY_LEN
 
@@ -167,3 +168,107 @@ class QuickReplyEditActivity(_FormActivity):
             del replies[self.index]
             self.mgr.set_quick_replies(replies)
         self.finish()
+
+
+class LocationActivity(Activity):
+    """Our position: from a GPS when one is switched on and answers, else set by hand (picked
+    on the map or typed). Whether adverts carry it."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        scr = T.make_screen()
+        T.HeaderSub(scr, "Location", back=self.finish)
+        body = T.scroll_area(scr, 14, 8)
+        body.set_style_pad_ver(8, lv.PART.MAIN)
+
+        card = T.card(body, filled=False, pad_ver=0, pad_hor=14, gap=0)
+        row = T.row(card, lv.pct(100), 52, 8)
+        T.label(row, "Use GPS", 16).set_flex_grow(1)
+        self._gps = T.switch(row, self.mgr.gps_status()["enabled"], self.set_gps)
+        self._gps_state = T.label(body, "", 13, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                                  width=lv.pct(100))
+
+        T.section_label(body, "My position")
+        card = T.card(body, filled=True, pad_ver=12, pad_hor=14, gap=4)
+        self._coords = T.label(card, "", 18, mono=True)
+        self._source = T.label(card, "", 13, col=T.MUTED)
+        actions = T.row(body, lv.pct(100), 48, 8)
+        for text, cb in (("Pick on map", self.pick), ("Enter", self.enter), ("Clear", self.clear)):
+            b = T.button(actions, text, cb, "tile", 48, width=1, size=16)
+            b.set_flex_grow(1)
+            if text == "Clear":
+                self._clear = b
+
+        card = T.card(body, filled=False, pad_ver=0, pad_hor=14, gap=0)
+        row = T.row(card, lv.pct(100), 52, 8)
+        T.label(row, "Share in adverts", 16).set_flex_grow(1)
+        self._share = T.switch(row, self.mgr.share_position(), self.mgr.set_share_position)
+        T.label(body, "Everyone on the mesh who hears your advert sees this position.", 13,
+                col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        self.refresh()
+        self.setContentView(scr)
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        self.mgr.add_subscriber(self._on_event)
+        self.refresh()
+
+    def onPause(self, screen):
+        self.mgr.remove_subscriber(self._on_event)
+        super().onPause(screen)
+
+    def _on_event(self, event, data):
+        if event == "position":
+            self.update_ui_threadsafe_if_foreground(self.refresh)
+
+    def refresh(self):
+        pos = self.mgr.position()
+        coords, source = ui_model.position_text(pos)
+        self._coords.set_text(coords)
+        self._source.set_text(source)
+        gps = self.mgr.gps_status()
+        self._gps_state.set_text(ui_model.gps_text(gps))
+        if gps["enabled"]:
+            self._gps.add_state(lv.STATE.CHECKED)
+        else:
+            self._gps.remove_state(lv.STATE.CHECKED)
+        if pos:
+            self._clear.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self._clear.add_flag(lv.obj.FLAG.HIDDEN)
+
+    def set_gps(self, on):
+        self.mgr.set_gps_enabled(on)
+        self.refresh()
+
+    def pick(self):
+        import map_view
+        self.startActivity(Intent(activity_class=map_view.MapPickActivity))
+
+    def enter(self):
+        self.startActivity(Intent(activity_class=CoordinatesActivity))
+
+    def clear(self):
+        self.mgr.clear_position()
+        self.refresh()
+
+
+class CoordinatesActivity(_FormActivity):
+    title = "Enter position"
+
+    def build(self):
+        pos = self.mgr.position()
+        text = "%.5f, %.5f" % (pos["lat"], pos["lon"]) if pos else ""
+        self._coords = self.field("Latitude, longitude", text, "50.85045, 4.34878")
+        self._first = self._coords
+        self._msg = self.hint("Decimal degrees, south and west negative.")
+        T.button(self.body, "Save", self.save, width=lv.pct(100))
+
+    def save(self):
+        ll = ui_model.parse_coords(self._coords.get_text())
+        ok, err = self.mgr.set_position(*ll) if ll else (False, "two numbers, like 50.85, 4.35")
+        if ok:
+            self.finish()
+        else:
+            self._msg.set_text(err)
+            self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)

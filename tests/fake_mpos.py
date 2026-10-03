@@ -250,6 +250,47 @@ class FakePolledChip:
         pass
 
 
+class FakeGPS:
+    """mpos.GPSManager: `present` says whether the board has an NMEA source; poll() hands the
+    queued sentences to the listeners."""
+
+    def __init__(self):
+        self.present = False
+        self.queue = []
+        self.listeners = []
+        self.polls = 0
+
+    def has_nmea_source(self):
+        return self.present
+
+    def add_nmea_listener(self, cb):
+        if cb not in self.listeners:
+            self.listeners.append(cb)
+
+    def remove_nmea_listener(self, cb):
+        if cb in self.listeners:
+            self.listeners.remove(cb)
+
+    def poll(self):
+        if not self.present:
+            return False
+        self.polls += 1
+        while self.queue:
+            s = self.queue.pop(0)
+            for cb in list(self.listeners):
+                cb(s)
+        return True
+
+    @staticmethod
+    def position_from_nmea(sentence):
+        f = sentence.split("*")[0].split(",")
+        if f[0].endswith("RMC") and len(f) > 6 and f[2] == "A":
+            lat = int(float(f[3]) / 100) + (float(f[3]) % 100) / 60
+            lon = int(float(f[5]) / 100) + (float(f[5]) % 100) / 60
+            return (-lat if f[4] == "S" else lat, -lon if f[6] == "W" else lon)
+        return None
+
+
 def _install_clock(env):
     """MicroPython's ticks/sleep_ms on CPython, driven by env.now_ms (sleep_ms never blocks)."""
     import time
@@ -270,10 +311,12 @@ def install(native=None):
     """Install the fakes; returns the FakeEnv. Re-imports the app modules fresh."""
     env = FakeEnv()
     env.lora = make_fake_lora_manager()
+    env.gps = FakeGPS()
     _install_clock(env)
     mpos = types.ModuleType("mpos")
     mpos.SharedPreferences = env.make_prefs_class()
     mpos.LoRaManager = env.lora
+    mpos.GPSManager = env.gps
 
     class DeviceInfo:
         hardware_id = "sensecap_indicator"

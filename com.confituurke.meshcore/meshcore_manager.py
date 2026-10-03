@@ -73,6 +73,14 @@ def tdiff(a, b):
     return ((a - b + _TICKS_HALF) % _TICKS_PERIOD) - _TICKS_HALF
 
 
+def _metres(lat1, lon1, lat2, lon2):
+    """Distance between two nearby points (equirectangular: plenty for "has it moved")."""
+    import math
+    x = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
+    y = math.radians(lat2 - lat1)
+    return 6371000 * math.sqrt(x * x + y * y)
+
+
 def tadd(a, delta):
     return (a + delta) % _TICKS_PERIOD
 
@@ -150,6 +158,10 @@ TUNES = {
     "advert": "advert:d=32,o=5,b=180:c",    # low and shorter: a node announced itself
     "test": "test:d=8,o=6,b=180:c",
 }
+GPS_DETECT_MS = 20000       # GPS switched on, nothing heard from it this long: no GPS, off again
+GPS_POLL_MS = 1000          # bring in the GPS's sentences this often
+GPS_SAVE_MS = 600000        # write a moving GPS position to flash at most this often
+GPS_SAVE_M = 50             # ... or once it moved this far
 TUNE_GAP_MS = 3000          # at most one beep this often (a burst of packets gets one sound)
 SOUND_DEFAULTS = {"enabled": False, "all": False, "channel": True, "dm": True, "mention": True,
                   "advert": False}
@@ -258,6 +270,7 @@ class MeshCoreManager:
         self._load_nodes()
         self._load_channel_history()
         self._load_unread()
+        self._load_position()
 
     def is_running(self):
         return self._running
@@ -669,7 +682,10 @@ class MeshCoreManager:
             return (False, "no identity -- generate one first")
         try:
             ts = self._timestamp(unique=True)
-            app_data = build_advert_appdata(ADV_TYPE_CHAT, self.nickname())
+            pos = self._position if self._share_position else None
+            app_data = build_advert_appdata(ADV_TYPE_CHAT, self.nickname(),
+                                            pos["lat"] if pos else None,
+                                            pos["lon"] if pos else None)
             message = advert_signed_message(pub, ts, app_data)
             signature = meshcore_crypto.sign(prv, message, pub)
             payload = assemble_advert_payload(pub, ts, signature, app_data)
@@ -1257,6 +1273,7 @@ class MeshCoreManager:
                     except Exception as e:
                         print("MeshCoreManager: server tick error:", repr(e))
                 self._flush_due()
+                self._gps_tick()
                 time.sleep(0.02)   # portable (MicroPython + CPython)
         self._worker_running = False
         self._flush_dirty()   # persist anything pending as the worker exits
@@ -1906,6 +1923,152 @@ class MeshCoreManager:
             self.add_contact(pk, node.get("name"), node.get("type"))
 
     # --- buzzer ------------------------------------------------------------ #
+    # --- own position ---------------------------------------------------------- #
+    def _load_position(self):
+        self._position = None           # {"lat", "lon", "source": "manual" | "gps"}
+        self._share_position = False
+        self._gps_on = False
+        self._gps_state = "off"         # off, searching, no_fix, fix, absent
+        self._gps_since = 0             # when the search started
+        self._gps_heard = None          # when the GPS last said anything
+        self._gps_polled = 0
+        self._gps_saved = None          # (ms, lat, lon) of the last write
+        try:
+            from mpos import SharedPreferences
+            prefs = SharedPreferences(NICKNAME_PREFS)
+            loc = prefs.get_dict("position", {}) or {}
+            if "lat" in loc and "lon" in loc:
+                self._position = {"lat": float(loc["lat"]), "lon": float(loc["lon"]),
+                                  "source": loc.get("source", "manual")}
+            self._share_position = bool(prefs.get_bool("share_position", False))
+            if prefs.get_bool("gps", False):
+                self.set_gps_enabled(True)
+        except Exception as e:
+            print("MeshCore: position load error:", repr(e))
+
+    def position(self):
+        """Our position: {"lat", "lon", "source"} or None."""
+        return dict(self._position) if self._position else None
+
+    def set_position(self, lat, lon, source="manual"):
+        try:
+            lat, lon = float(lat), float(lon)
+        except (TypeError, ValueError):
+            return (False, "not a number")
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):     # also false for NaN
+            return (False, "latitude -90..90, longitude -180..180")
+        if lat == 0 and lon == 0:
+            return (False, "0, 0 means no position on the mesh")
+        self._position = {"lat": lat, "lon": lon, "source": source}
+        self._save_position()
+        self._notify("position", self.position())
+        return (True, None)
+
+    def clear_position(self):
+        self._position = None
+        self._save_position()
+        self._notify("position", None)
+
+    def _save_position(self):
+        try:
+            ed = self._editor()
+            ed.put_dict("position", self._position or {})
+            self._commit(ed)
+            if self._position:
+                self._gps_saved = (self._now_ms(), self._position["lat"], self._position["lon"])
+        except Exception as e:
+            print("MeshCore: position save error:", repr(e))
+
+    def share_position(self):
+        return self._share_position
+
+    def set_share_position(self, on):
+        self._share_position = bool(on)
+        try:
+            ed = self._editor()
+            ed.put_bool("share_position", self._share_position)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: share setting error:", repr(e))
+
+    def gps_status(self):
+        return {"enabled": self._gps_on, "state": self._gps_state}
+
+    def set_gps_enabled(self, on):
+        """Switch the GPS on or off. Returns (ok, err); without a GPS it stays off."""
+        gps = self._gps_manager()
+        if on and (gps is None or not gps.has_nmea_source()):
+            self._gps_switch(False, "absent")
+            return (False, "No GPS found")
+        if on:
+            self._gps_since = self._now_ms()
+            self._gps_heard = None
+            gps.add_nmea_listener(self._on_nmea)
+            self._gps_switch(True, "searching")
+        else:
+            if gps is not None:
+                gps.remove_nmea_listener(self._on_nmea)
+            self._gps_switch(False, "off")
+        return (True, None)
+
+    def _gps_switch(self, on, state):
+        changed = on != self._gps_on
+        self._gps_on, self._gps_state = on, state
+        if changed or not on:
+            try:
+                ed = self._editor()
+                ed.put_bool("gps", on)
+                self._commit(ed)
+            except Exception as e:
+                print("MeshCore: gps setting error:", repr(e))
+        self._notify("position", self.position())
+
+    @staticmethod
+    def _gps_manager():
+        try:
+            from mpos import GPSManager
+            return GPSManager if hasattr(GPSManager, "has_nmea_source") else None
+        except ImportError:
+            return None
+
+    def _gps_tick(self):
+        """Worker idle path: bring in the GPS's sentences; a GPS that never says anything is
+        not there, and is switched off."""
+        if not self._gps_on:
+            return
+        now = self._now_ms()
+        if tdiff(now, self._gps_polled) >= GPS_POLL_MS:
+            self._gps_polled = now
+            gps = self._gps_manager()
+            if gps is not None:
+                gps.poll()
+        if self._gps_heard is None and tdiff(now, self._gps_since) > GPS_DETECT_MS:
+            gps = self._gps_manager()
+            if gps is not None:
+                gps.remove_nmea_listener(self._on_nmea)
+            print("MeshCore: no GPS answered, GPS switched off")
+            self._gps_switch(False, "absent")
+
+    def _on_nmea(self, sentence):
+        now = self._now_ms()
+        self._gps_heard = now
+        gps = self._gps_manager()
+        fix = gps.position_from_nmea(sentence) if gps is not None else None
+        if fix is None:
+            if self._gps_state == "searching":       # it answers, without a fix yet
+                self._gps_state = "no_fix"
+                self._notify("position", self.position())
+            return
+        lat, lon = fix
+        first = self._gps_state != "fix"
+        self._gps_state = "fix"
+        self._position = {"lat": lat, "lon": lon, "source": "gps"}
+        saved = self._gps_saved
+        if (first or saved is None or tdiff(now, saved[0]) >= GPS_SAVE_MS
+                or _metres(lat, lon, saved[1], saved[2]) >= GPS_SAVE_M):
+            self._save_position()
+            self._notify("position", self.position())
+
     def sound_settings(self):
         """{enabled, channel, dm, advert}: whether the buzzer sounds, and for what."""
         out = dict(SOUND_DEFAULTS)

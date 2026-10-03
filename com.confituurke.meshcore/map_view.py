@@ -1,7 +1,8 @@
 """The map: offline tiles from the SD card (/sdcard/maps/dark, see map_tiles) with a pin for
-every node that sent its position. Drag to pan, + and - to zoom, the fit button shows all
-pins; a tap on a pin opens that node. Used by the Map tab and by MapActivity (a node's Map
-button), which centres on one node."""
+every node that sent its position and a marker for our own. Drag to pan, + and - to zoom, the
+fit button shows all pins, the "me" button centres on us; a tap on a pin opens that node. Used
+by the Map tab, by MapActivity (a node's Map button, centred on that node) and by
+MapPickActivity (choose our position under a crosshair)."""
 
 import lvgl as lv
 
@@ -18,6 +19,8 @@ LAND = 0x141B23                 # the style's land colour: shown where a tile is
 HOME = (50.64, 4.67, 8)         # Belgium, when no node has a position
 CREDIT = "© OpenMapTiles © OpenStreetMap contributors"
 PIN = 14
+ME = 18                         # our own marker: a light dot in an accent ring
+ME_ZOOM = 15
 LABEL_ZOOM = 13                 # names next to the pins from this zoom on
 TAP_PX = 28
 DRAG_PX = 8
@@ -81,7 +84,7 @@ class _Slot:
 
 class MapView:
 
-    def __init__(self, parent, mgr, w, h, open_node, focus=None):
+    def __init__(self, parent, mgr, w, h, open_node, focus=None, controls=True):
         self.mgr = mgr
         self.w, self.h = w, h
         self.open_node = open_node
@@ -98,6 +101,9 @@ class MapView:
         self.pin_layer.set_pos(0, 0)
         self._slots = []
         self._pins = {}             # pubkey -> (dot, label)
+        self.me = T.box(self.pin_layer, ME, ME)
+        T.fill(self.me, T.TEXT, ME // 2, T.ACCENT, 4)
+        self.me.add_flag(lv.obj.FLAG.HIDDEN)
         self._pin_model = []
         self._drag = None
         self._ready = False
@@ -109,7 +115,9 @@ class MapView:
         self.note.set_style_pad_all(10, lv.PART.MAIN)
         self.note.align(lv.ALIGN.CENTER, 0, 0)
         self.note.add_flag(lv.obj.FLAG.HIDDEN)
-        self._controls()
+        self._me_button = None
+        if controls:
+            self._controls()
         credit = T.label(self.obj, CREDIT, 11, col=T.MUTED)
         T.fill(credit, T.BG, 6)
         credit.set_style_bg_opa(lv.OPA._70, lv.PART.MAIN)
@@ -133,18 +141,38 @@ class MapView:
         col = T.column(self.obj, 48, lv.SIZE_CONTENT, 8)
         col.align(lv.ALIGN.TOP_RIGHT, -8, 8)
         for name, cb in (("plus", lambda: self.zoom(1)), ("minus", lambda: self.zoom(-1)),
-                         ("fit", self.fit_all)):
+                         ("fit", self.fit_all), ("me", self.center_me)):
             b = T.icon_button(col, name, cb)
             T.fill(b, T.SURFACE, 10, T.OUTLINE)
+        self._me_button = b
 
     def _initial_view(self, focus):
         nodes = _nodes(self.mgr)
+        me = self.mgr.position()
+        if focus == "me" and me:
+            return me["lat"], me["lon"], ME_ZOOM
         if focus is not None:
             for n in nodes:
                 if n.get("pubkey") == focus and M.positions([n]):
                     return n["lat"], n["lon"], 15
-        view = M.fit(M.positions(nodes), self.w, self.h)
+        view = M.fit(self._points(nodes), self.w, self.h)
         return view if view is not None else HOME
+
+    def _points(self, nodes):
+        pts = M.positions(nodes)
+        me = self.mgr.position()
+        if me:
+            pts.append((me["lat"], me["lon"]))
+        return pts
+
+    def center(self):
+        """(lat, lon) under the middle of the view."""
+        return M.latlon(self.cx, self.cy, self.z)
+
+    def center_me(self):
+        me = self.mgr.position()
+        if me:
+            self._set_view(me["lat"], me["lon"], max(self.z, ME_ZOOM))
 
     def _set_view(self, lat, lon, z):
         self.z = M.clamp_zoom(z)
@@ -162,7 +190,7 @@ class MapView:
         self.layout()
 
     def fit_all(self):
-        view = M.fit(M.positions(_nodes(self.mgr)), self.w, self.h)
+        view = M.fit(self._points(_nodes(self.mgr)), self.w, self.h)
         self._set_view(*(view or HOME))
 
     def layout(self, load=True):
@@ -218,7 +246,28 @@ class MapView:
         self._nodes = _nodes(self.mgr)
         self._place_pins()
 
+    def _place_me(self):
+        me = self.mgr.position()
+        if self._me_button is not None:
+            if me:
+                self._me_button.remove_flag(lv.obj.FLAG.HIDDEN)
+            else:
+                self._me_button.add_flag(lv.obj.FLAG.HIDDEN)
+        if not me:
+            self.me.add_flag(lv.obj.FLAG.HIDDEN)
+            return
+        x, y = M.world_px(me["lat"], me["lon"], self.z)
+        sx, sy = x - (self.cx - self.w / 2), y - (self.cy - self.h / 2)
+        self.me_xy = (sx, sy)
+        if -ME <= sx <= self.w + ME and -ME <= sy <= self.h + ME:
+            self.me.set_pos(int(sx) - ME // 2, int(sy) - ME // 2)
+            self.me.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.me.move_foreground()
+        else:
+            self.me.add_flag(lv.obj.FLAG.HIDDEN)
+
     def _place_pins(self):
+        self._place_me()
         model = M.pins(self._nodes, self.cx, self.cy, self.z, self.w, self.h)
         self._pin_model = model
         names = self.z >= LABEL_ZOOM or len(model) <= 12
@@ -323,6 +372,38 @@ class MapActivity(Activity):
         self.view = MapView(scr, self.mgr, T.W, T.H - T.TOP - T.HEADER_H,
                             lambda p, k: open_node(self, self.mgr, p, k), focus=pk)
         self.setContentView(scr)
+
+    def onDestroy(self, screen):
+        self.view.destroy()
+
+
+class MapPickActivity(Activity):
+    """Choose our position: move the map until the crosshair is on the spot, then use it."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        scr = T.make_screen()
+        T.HeaderSub(scr, "Pick your position", back=self.finish)
+        bar_h = 72
+        self.view = MapView(scr, self.mgr, T.W, T.H - T.TOP - T.HEADER_H - bar_h,
+                            lambda p, k: None, focus="me", controls=True)
+        cross = T.box(self.view.obj, 40, 40)
+        T.outline(cross, T.ACCENT, 20, 3)
+        cross.align(lv.ALIGN.CENTER, 0, 0)
+        dot = T.box(cross, 6, 6)
+        T.fill(dot, T.ACCENT, 3)
+        dot.center()
+        self.crosshair = cross
+        bar = T.row(scr, T.W, bar_h, 8)
+        bar.set_style_pad_hor(14, lv.PART.MAIN)
+        self.button = T.button(bar, "Use this spot", self.use, width=lv.pct(100))
+        self.setContentView(scr)
+
+    def use(self):
+        lat, lon = self.view.center()
+        ok, err = self.mgr.set_position(lat, lon)
+        if ok:
+            self.finish()
 
     def onDestroy(self, screen):
         self.view.destroy()
