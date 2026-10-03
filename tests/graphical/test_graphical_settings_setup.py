@@ -234,6 +234,53 @@ class TestContactAndReplySettings(unittest.TestCase):
         self.assertTrue(self.m.auto_add_settings()["rptr"])
         self.assertFalse(self.m.auto_add_settings()["chat"])
 
+    def _flip(self, sw, on):
+        if on:
+            sw.add_state(lv.STATE.CHECKED)
+        else:
+            sw.remove_state(lv.STATE.CHECKED)
+        sw.send_event(lv.EVENT.VALUE_CHANGED, None)
+        wait_for_render(5)
+
+    def test_auto_add_main_switch_hides_the_rest(self):
+        act = mc_fixtures.open_app(tab="Settings")
+        tab = act._tab
+        self.assertTrue(tab._auto_rows.has_flag(lv.obj.FLAG.HIDDEN))
+        self._flip(tab._auto["enabled"], True)
+        self.assertFalse(tab._auto_rows.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue(self.m.auto_add_settings()["enabled"])
+
+    def test_auto_add_all_locks_the_types_on_and_keeps_the_own_choice(self):
+        act = mc_fixtures.open_app(tab="Settings")
+        tab = act._tab
+        self._flip(tab._auto["enabled"], True)
+        self._flip(tab._auto["rptr"], True)
+        self._flip(tab._auto["all"], True)
+        for k in ("chat", "rptr", "room", "sensor"):
+            self.assertTrue(tab._auto[k].has_state(lv.STATE.CHECKED))
+            self.assertTrue(tab._auto[k].has_state(lv.STATE.DISABLED))
+        self._flip(tab._auto["all"], False)
+        self.assertTrue(tab._auto["rptr"].has_state(lv.STATE.CHECKED))
+        self.assertFalse(tab._auto["chat"].has_state(lv.STATE.CHECKED))
+        self.assertFalse(tab._auto["chat"].has_state(lv.STATE.DISABLED))
+
+    def test_auto_add_max_hops_page(self):
+        act = mc_fixtures.open_app(tab="Settings")
+        tab = act._tab
+        self._flip(tab._auto["enabled"], True)
+        self.assertEqual(tab._hops_row.value.get_text(), "any")
+        tab._hops_row.obj.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        page._hops.set_text("99")
+        page.save()
+        self.assertIs(mpos.ui.screen_stack[-1][0], page)
+        page._hops.set_text("3")
+        page.save()
+        wait_for_render(20)
+        self.assertEqual(self.m.auto_add_settings()["max_hops"], 3)
+        self.assertEqual(tab._hops_row.value.get_text(), "3")
+
     def test_mention_sound_row(self):
         act = mc_fixtures.open_app(tab="Settings")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Mentions"))

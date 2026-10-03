@@ -191,7 +191,10 @@ SOUND_KINDS = ("channel", "mention", "dm", "advert")
 DEFAULT_QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")
 MAX_QUICK_REPLIES = 8
 MAX_QUICK_REPLY_LEN = 40
-AUTO_ADD_DEFAULTS = {"chat": False, "rptr": False, "room": False, "sensor": False}
+AUTO_ADD_KINDS = ("chat", "rptr", "room", "sensor")
+AUTO_ADD_DEFAULTS = {"enabled": False, "all": False, "chat": False, "rptr": False, "room": False,
+                     "sensor": False, "max_hops": None}
+MAX_HOPS = 64               # a flood path holds at most 64 hops
 RECENT_MAX = 20                 # packets kept for the Radio tab's "recently heard" list
 RX_RATE_WINDOW_MS = 10 * 60 * 1000
 _KIND_SHORT = {PAYLOAD_TYPE_GRP_TXT: "GRP", 0x06: "GRP", PAYLOAD_TYPE_ADVERT: "ADV",
@@ -1984,27 +1987,59 @@ class MeshCoreManager:
         return clean
 
     def auto_add_settings(self):
-        """{chat, rptr, room, sensor}: node types added to the contacts when their advert
-        is heard."""
+        """{enabled, all, chat, rptr, room, sensor, max_hops}: whether nodes become contacts
+        when their advert is heard; all types, or the types switched on (kept while "all" is
+        on); max_hops None means any distance. Saved before the main switch existed, the
+        types alone decide: on when any of them is."""
         out = dict(AUTO_ADD_DEFAULTS)
         try:
             from mpos import SharedPreferences
             saved = SharedPreferences(NICKNAME_PREFS).get_dict("auto_add", {}) or {}
-            for k in out:
+            for k in AUTO_ADD_KINDS + ("all",):
                 if k in saved:
                     out[k] = bool(saved[k])
+            out["enabled"] = bool(saved["enabled"]) if "enabled" in saved else \
+                any(out[k] for k in AUTO_ADD_KINDS)
+            out["max_hops"] = self._hop_limit(saved.get("max_hops"))
         except Exception:
             pass
         return out
 
+    @staticmethod
+    def _hop_limit(v):
+        """A hop count 0..64 or None (no limit); anything else is no limit."""
+        if v is None or v == "":
+            return None
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if 0 <= n <= MAX_HOPS else None
+
     def set_auto_add(self, **changes):
         cur = self.auto_add_settings()
         for k, v in changes.items():
-            if k in cur:
+            if k == "max_hops":
+                cur[k] = self._hop_limit(v)
+            elif k in cur:
                 cur[k] = bool(v)
+        if "enabled" in changes:
+            self._auto_add_switch_set = True
+        elif not getattr(self, "_auto_add_switch_set", False):
+            try:
+                from mpos import SharedPreferences
+                saved = SharedPreferences(NICKNAME_PREFS).get_dict("auto_add", {}) or {}
+                self._auto_add_switch_set = "enabled" in saved
+            except Exception:
+                pass
+            if not self._auto_add_switch_set:   # never switched: the types decide
+                cur["enabled"] = any(cur[k] for k in AUTO_ADD_KINDS)
+        stored = dict(cur)
+        if not getattr(self, "_auto_add_switch_set", False):
+            del stored["enabled"]
         try:
             ed = self._editor()
-            ed.put_dict("auto_add", cur)
+            ed.put_dict("auto_add", stored)
             self._commit(ed)
         except Exception as e:
             print("MeshCore: auto-add error:", repr(e))
@@ -2018,9 +2053,15 @@ class MeshCoreManager:
         cfg = getattr(self, "_auto_add_cache", None)
         if cfg is None:
             cfg = self._auto_add_cache = self.auto_add_settings()
+        if not cfg.get("enabled"):
+            return
         kind = {1: "chat", 2: "rptr", 3: "room", 4: "sensor"}.get(node.get("type"))
-        if kind and cfg.get(kind):
-            self.add_contact(pk, node.get("name"), node.get("type"))
+        if not kind or not (cfg.get("all") or cfg.get(kind)):
+            return
+        limit = cfg.get("max_hops")
+        if limit is not None and (node.get("hops") or 0) > limit:
+            return
+        self.add_contact(pk, node.get("name"), node.get("type"))
 
     # --- buzzer ------------------------------------------------------------ #
     # --- path hash size and region scopes ----------------------------------- #

@@ -54,7 +54,9 @@ def test_at_most_eight_quick_replies():
 
 def test_auto_add_is_off_by_default():
     env, m = _setup()
-    _assert(m.auto_add_settings() == {"chat": False, "rptr": False, "room": False, "sensor": False})
+    _assert(m.auto_add_settings() == {"enabled": False, "all": False, "chat": False, "rptr": False,
+                                      "room": False, "sensor": False, "max_hops": None},
+            m.auto_add_settings())
     pub, raw = fake_mpos.advert_frame(bytes([9]) * 32, "Robin", 1790000000, node_type=1)
     m._ingest(raw, rssi=-90, snr=4)
     _assert(not m.is_contact(pub.hex()))
@@ -70,6 +72,55 @@ def test_auto_add_per_type():
     _assert(m.is_contact(rptr.hex()) and m.get_contact(rptr.hex())["type"] == 2)
     _assert(not m.is_contact(chat.hex()))
     _assert(fake_mpos.new_manager(env).auto_add_settings()["rptr"])
+
+
+def _advert(m, seed, name, node_type=1, hops=0):
+    pub, raw = fake_mpos.advert_frame(bytes([seed]) * 32, name, 1790000000, node_type=node_type,
+                                      path=bytes(range(1, hops + 1)))
+    m._ingest(raw, rssi=-90, snr=4)
+    return pub.hex()
+
+
+def test_auto_add_switched_off_adds_nothing():
+    env, m = _setup()
+    m.set_auto_add(all=True, enabled=False)
+    _assert(not m.is_contact(_advert(m, 9, "Robin")), "off")
+    m.set_auto_add(enabled=True)
+    _assert(m.is_contact(_advert(m, 8, "Sam")), "on")
+
+
+def test_all_adds_every_type_and_keeps_the_own_choice():
+    env, m = _setup()
+    m.set_auto_add(enabled=True, rptr=True)
+    m.set_auto_add(all=True)
+    _assert(m.is_contact(_advert(m, 9, "Robin", node_type=1)), "companion via all")
+    cfg = m.set_auto_add(all=False)
+    _assert(cfg["rptr"] and not cfg["chat"], cfg)
+    _assert(not m.is_contact(_advert(m, 6, "Kai", node_type=1)), "own choice again")
+
+
+def test_max_hops_limits_what_is_added():
+    env, m = _setup()
+    m.set_auto_add(enabled=True, all=True, max_hops=2)
+    _assert(m.is_contact(_advert(m, 9, "Near", hops=2)), "2 hops")
+    _assert(not m.is_contact(_advert(m, 8, "Far", hops=3)), "3 hops")
+    m.set_auto_add(max_hops=None)
+    _assert(m.is_contact(_advert(m, 7, "Farther", hops=5)), "no limit")
+    _assert(fake_mpos.new_manager(env).auto_add_settings()["max_hops"] is None, "saved")
+
+
+def test_max_hops_must_be_a_hop_count():
+    env, m = _setup()
+    for bad in (-1, 65, "x"):
+        _assert(m.set_auto_add(max_hops=bad)["max_hops"] is None, bad)
+    _assert(m.set_auto_add(max_hops="3")["max_hops"] == 3, "text number")
+
+
+def test_an_older_setting_without_the_main_switch_keeps_working():
+    env, m = _setup()
+    env.prefs("com.confituurke.meshcore")["auto_add"] = {"chat": True, "rptr": True}
+    cfg = fake_mpos.new_manager(env).auto_add_settings()
+    _assert(cfg["enabled"] and not cfg["all"] and cfg["chat"] and cfg["rptr"], cfg)
 
 
 # --- mention sound -------------------------------------------------------------- #

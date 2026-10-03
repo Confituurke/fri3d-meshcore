@@ -69,17 +69,7 @@ class SettingsTab(Tab):
                      lambda: self._open(settings_pages.QuickRepliesActivity), first=True)
 
         T.section_label(body, "Auto-add contacts")
-        card = self._card(body)
-        auto = self.mgr.auto_add_settings()
-        self._auto = {}
-        for i, (key, text) in enumerate(self._AUTO):
-            row = T.row(card, lv.pct(100), 52, 8)
-            if i:
-                T.divider(row, lv.BORDER_SIDE.TOP)
-            T.label(row, text, 16).set_flex_grow(1)
-            self._auto[key] = T.switch(row, auto[key], lambda v, k=key: self.mgr.set_auto_add(**{k: v}))
-        T.label(body, "Nodes of the switched-on kinds become contacts when their advert is heard.",
-                13, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        self._build_auto_add(body)
 
         T.section_label(body, "Channels")
         self._channels = self._card(body)
@@ -94,6 +84,56 @@ class SettingsTab(Tab):
               ("mention", "Mentions"), ("advert", "Adverts heard"))
     _AUTO = (("chat", "Companions"), ("rptr", "Repeaters"), ("room", "Room servers"),
              ("sensor", "Sensors"))
+
+    def _build_auto_add(self, body):
+        cfg = self.mgr.auto_add_settings()
+        card = self._card(body)
+        self._auto = {}
+        row = T.row(card, lv.pct(100), 52, 8)
+        T.label(row, "Auto-add contacts", 16).set_flex_grow(1)
+        self._auto["enabled"] = T.switch(row, cfg["enabled"], self._set_auto_enabled)
+        self._auto_rows = T.column(card, lv.pct(100), lv.SIZE_CONTENT, 0)
+        for key, text in (("all", "All types"),) + self._AUTO:
+            row = T.row(self._auto_rows, lv.pct(100), 52, 8)
+            T.divider(row, lv.BORDER_SIDE.TOP)
+            T.label(row, text, 16).set_flex_grow(1)
+            self._auto[key] = T.switch(row, cfg[key], lambda v, k=key: self._set_auto_kind(k, v))
+        self._hops_row = T.SettingRow(self._auto_rows, "Max hops", self._hops_text(cfg),
+                                      lambda: self._open(settings_pages.MaxHopsActivity))
+        self._auto_note = T.label(body, "Nodes of the switched-on types become contacts when "
+                                  "their advert is heard, if it came no more hops than set.",
+                                  13, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                                  width=lv.pct(100))
+        self._show_auto(cfg)
+
+    @staticmethod
+    def _hops_text(cfg):
+        return "any" if cfg["max_hops"] is None else str(cfg["max_hops"])
+
+    def _set_auto_enabled(self, on):
+        self._show_auto(self.mgr.set_auto_add(enabled=on))
+
+    def _set_auto_kind(self, key, on):
+        self._show_auto(self.mgr.set_auto_add(**{key: on}))
+
+    def _show_auto(self, cfg):
+        """Off hides the rest. With All on, every type is added: their switches show on and
+        are locked; with All off they show (and edit) the own choice, which All leaves be."""
+        for o in (self._auto_rows, self._auto_note):
+            if cfg["enabled"]:
+                o.remove_flag(lv.obj.FLAG.HIDDEN)
+            else:
+                o.add_flag(lv.obj.FLAG.HIDDEN)
+        self._check(self._auto["enabled"], cfg["enabled"])
+        self._check(self._auto["all"], cfg["all"])
+        for k, _ in self._AUTO:
+            sw = self._auto[k]
+            self._check(sw, cfg["all"] or cfg[k])
+            if cfg["all"]:
+                sw.add_state(lv.STATE.DISABLED)
+            else:
+                sw.remove_state(lv.STATE.DISABLED)
+        self._hops_row.value.set_text(self._hops_text(cfg))
 
     def _build_sounds(self, body):
         cfg = self.mgr.sound_settings()
@@ -197,6 +237,7 @@ class SettingsTab(Tab):
         self._preset_row.value.set_text(self._preset_text())
         self._hash_row.value.set_text(self._hash_text())
         self._regions_row.value.set_text(self._regions_text())
+        self._show_auto(self.mgr.auto_add_settings())
         self._location_row.value.set_text(self._location_text())
         self._look_row.value.set_text(settings_pages.appearance_text())
         self._fill_channels()

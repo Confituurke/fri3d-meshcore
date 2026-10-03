@@ -462,3 +462,25 @@ class IdentityActivity(Activity):
     def onPause(self, screen):
         T.close_sheets()
         super().onPause(screen)
+
+
+class MaxHopsActivity(_FormActivity):
+    title = "Max hops"
+
+    def build(self):
+        cur = self.mgr.auto_add_settings()["max_hops"]
+        self._hops = self.field("Auto-add nodes heard over at most", "" if cur is None else str(cur),
+                                "any number of hops")
+        self._first = self._hops
+        self._msg = self.hint("Empty: any distance (up to 64 hops). 0: only nodes heard "
+                              "directly.")
+        T.button(self.body, "Save", self.save, width=lv.pct(100))
+
+    def save(self):
+        text = self._hops.get_text().strip()
+        cfg = self.mgr.set_auto_add(max_hops=text or None)
+        if text and cfg["max_hops"] is None:
+            self._msg.set_text("A number from 0 to 64, or empty for any distance.")
+            self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)
+            return
+        self.finish()
