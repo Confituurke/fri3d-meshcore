@@ -7,6 +7,7 @@ from mpos import Intent
 
 import meshcore_presets
 import ui_theme as T
+import routing_pages
 import settings_pages
 import setup_activity
 import thread_activity
@@ -36,6 +37,10 @@ class SettingsTab(Tab):
         card = self._card(body)
         self._preset_row = T.SettingRow(card, "Radio preset", self._preset_text(),
                                         self.change_preset, first=True)
+        self._hash_row = T.SettingRow(card, "Path hash size", self._hash_text(),
+                                      lambda: self._open(routing_pages.PathHashActivity))
+        self._regions_row = T.SettingRow(card, "Regions", self._regions_text(),
+                                         lambda: self._open(routing_pages.RegionsActivity))
         row = T.row(card, lv.pct(100), 52, 8)
         T.divider(row, lv.BORDER_SIDE.TOP)
         T.label(row, "Receive in background", 16).set_flex_grow(1)
@@ -142,6 +147,15 @@ class SettingsTab(Tab):
     def _card(self, parent):
         return T.card(parent, filled=False, pad_ver=0, pad_hor=14, gap=0)
 
+    def _hash_text(self):
+        n = self.mgr.path_hash_size()
+        return "%d byte%s" % (n, "" if n == 1 else "s")
+
+    def _regions_text(self):
+        d = self.mgr.default_region()
+        return "#" + d if d else ("%d, no default" % len(self.mgr.regions())
+                                  if self.mgr.regions() else "none")
+
     def _location_text(self):
         pos = self.mgr.position()
         if self.mgr.gps_status()["enabled"]:
@@ -176,6 +190,8 @@ class SettingsTab(Tab):
     def on_resume(self):
         self._name_row.value.set_text(self.mgr.nickname())
         self._preset_row.value.set_text(self._preset_text())
+        self._hash_row.value.set_text(self._hash_text())
+        self._regions_row.value.set_text(self._regions_text())
         self._location_row.value.set_text(self._location_text())
         self._look_row.value.set_text(settings_pages.appearance_text())
         self._fill_channels()

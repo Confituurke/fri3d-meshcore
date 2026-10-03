@@ -64,6 +64,7 @@ class ChatsTab(Tab):
             row = self._rows.get(r["key"])
             if row is None:
                 row = T.ListRow(self.list, lambda k=r["key"], kind=r["kind"]: self.open_chat(k, kind))
+                T.on_long_press(row.obj, lambda k=r["key"], kind=r["kind"]: self.menu(k, kind))
             row.set_avatar(r["kind"], r["initials"])
             row.title.set_text(r["title"])
             row.right.set_text(r["time"])
@@ -78,6 +79,12 @@ class ChatsTab(Tab):
             self.empty.add_flag(lv.obj.FLAG.HIDDEN)
         else:
             self.empty.remove_flag(lv.obj.FLAG.HIDDEN)
+
+    def menu(self, key, kind):
+        import quick_actions
+        self.sheet = quick_actions.chat_menu(self.activity, self.mgr, key,
+                                             "channel" if kind == "channel" else "dm",
+                                             self.open_chat)
 
     def open_chat(self, key, kind):
         if kind == "channel":

@@ -805,3 +805,95 @@ def tz_offset_s():
         return tz_offset(mpos.time.localtime(), time.gmtime())
     except Exception:
         return 0
+
+
+# --- long press, action sheets, choice lists ------------------------------------- #
+
+def on_long_press(obj, callback):
+    """`callback()` on a long press. The press then ends there: no click follows it."""
+    obj.add_flag(lv.obj.FLAG.CLICKABLE)
+
+    def handler(e):
+        try:
+            lv.indev_active().wait_release()
+        except Exception:
+            pass
+        callback()
+
+    obj.add_event_cb(handler, lv.EVENT.LONG_PRESSED, None)
+    return obj
+
+
+class ActionSheet:
+    """A panel of actions from the bottom of the screen over a dimmed view, as the MeshCore
+    apps show on a long press. `actions`: (text, callback) or (text, callback, style) with
+    style "danger" (red text) or "checked" (a tick). A tap outside closes it."""
+
+    shown = []                  # open sheets (they live on the top layer, above any screen)
+
+    def __init__(self, title, actions, subtitle=None):
+        ActionSheet.shown.append(self)
+        self.dim = box(lv.layer_top(), W, H)
+        self.dim.set_style_bg_color(color(0x000000), lv.PART.MAIN)
+        self.dim.set_style_bg_opa(lv.OPA._50, lv.PART.MAIN)
+        clickable(self.dim, self.close, feedback=False)
+        panel = column(self.dim, W, lv.SIZE_CONTENT, 0)
+        fill(panel, SURFACE, 16)
+        panel.set_style_pad_hor(14, lv.PART.MAIN)
+        panel.set_style_pad_top(12, lv.PART.MAIN)
+        panel.set_style_pad_bottom(8, lv.PART.MAIN)
+        panel.align(lv.ALIGN.BOTTOM_MID, 0, 16)       # rounded top corners only
+        panel.set_style_max_height(H - TOP - 24, lv.PART.MAIN)
+        panel.add_flag(lv.obj.FLAG.SCROLLABLE)        # many actions: the panel scrolls
+        clickable(panel, lambda: None, feedback=False)  # taps on the panel keep it open
+        label(panel, title, 16, 700, long_mode=lv.label.LONG_MODE.DOTS, width=lv.pct(100))
+        if subtitle:
+            label(panel, subtitle, 13, col=MUTED, long_mode=lv.label.LONG_MODE.DOTS,
+                  width=lv.pct(100))
+        self.rows = {}
+        for item in actions:
+            text, cb = item[0], item[1]
+            style = item[2] if len(item) > 2 else None
+            r = row(panel, lv.pct(100), 52, 8)
+            divider(r, lv.BORDER_SIDE.TOP)
+            label(r, text, 16, col=FAIL_TEXT if style == "danger" else TEXT).set_flex_grow(1)
+            if style == "checked":
+                icon(r, "check", ACCENT)
+            clickable(r, lambda cb=cb: self._run(cb))
+            self.rows[text] = r
+        box(panel, lv.pct(100), 16)                   # under the screen edge
+
+    def _run(self, cb):
+        self.close()
+        cb()
+
+    def close(self):
+        if self.dim is not None:
+            self.dim.delete()
+            self.dim = None
+        if self in ActionSheet.shown:
+            ActionSheet.shown.remove(self)
+
+
+def close_sheets():
+    """Close every open action sheet (a screen being left must not leave one behind)."""
+    for s in list(ActionSheet.shown):
+        s.close()
+
+
+def choice_list(parent, choices, selected, on_choose):
+    """A card of rows to pick one of: choices [(text, value)], a tick on `selected`.
+    Returns {value: row}."""
+    c = card(parent, filled=False, pad_ver=0, pad_hor=14, gap=0)
+    rows = {}
+    for i, (text, value) in enumerate(choices):
+        r = row(c, lv.pct(100), 48, 8)
+        if i:
+            divider(r, lv.BORDER_SIDE.TOP)
+        on = value == selected
+        label(r, text, 16, 600 if on else 400).set_flex_grow(1)
+        if on:
+            icon(r, "check", ACCENT)
+        clickable(r, lambda v=value: on_choose(v))
+        rows[value] = r
+    return rows

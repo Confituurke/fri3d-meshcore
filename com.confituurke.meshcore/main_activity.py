@@ -17,6 +17,8 @@ import tab_settings
 import thread_activity  # noqa: F401  (notification intents name its classes)
 import setup_activity
 import settings_pages  # noqa: F401
+import routing_pages  # noqa: F401
+import quick_actions  # noqa: F401
 from meshcore_manager import MeshCoreManager, MESHCORE_APP
 
 
@@ -109,6 +111,7 @@ class MeshCoreHome(Activity):
             self._tab.on_resume()
 
     def onPause(self, screen):
+        T.close_sheets()
         self.mgr.remove_subscriber(self._on_event)
         super().onPause(screen)
 

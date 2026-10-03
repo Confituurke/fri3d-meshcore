@@ -348,5 +348,49 @@ def test_position_texts():
     _assert(ui.gps_text({"enabled": True, "state": "no_fix"}) == "Waiting for a fix", "no fix")
     _assert(ui.gps_text({"enabled": True, "state": "fix"}) == "Position from the GPS", "fix")
 
+
+def test_route_pill_texts():
+    ui = _ui()
+    _assert(ui.route_pill("auto", 0, False) == "flood", "no path")
+    _assert(ui.route_pill("flood", 0x02, True) == "flood (forced)", "forced")
+    _assert(ui.route_pill("auto", 0x00, True) == "direct", "zero hop")
+    _assert(ui.route_pill("auto", 0x42, True) == "2 hops", "two")
+    _assert(ui.route_pill("manual", 0x01, True) == "1 hop (set)", "manual")
+
+
+def test_path_shown_hop_by_hop():
+    ui = _ui()
+    _assert(ui.hops_text("a1b2c3", 1) == "A1 \u2192 B2 \u2192 C3", ui.hops_text("a1b2c3", 1))
+    _assert(ui.hops_text("a1b2c3d4", 2) == "A1B2 \u2192 C3D4", "two bytes")
+    _assert(ui.hops_text("", 1) == "", "none")
+
+
+def test_details_of_a_received_message():
+    ui = _ui()
+    msg = {"ts": NOW, "sender": "Sam", "text": "hi", "incoming": True, "snr": 6.5, "rssi": -91,
+           "hops": 2, "path": "a1b2", "hsize": 1, "region": "be-wvl"}
+    rows = dict(ui.message_details(msg))
+    _assert(rows["From"] == "Sam", rows)
+    _assert(rows["Sent"] == "Fri 2 Oct 14:32", rows["Sent"])
+    _assert(rows["Hops"] == "2" and rows["Path"] == "A1 \u2192 B2", rows)
+    _assert(rows["Path hash"] == "1 byte" and rows["Region"] == "#be-wvl", rows)
+    _assert(rows["SNR"] == "6.5 dB" and rows["RSSI"] == "\u221291 dBm", rows)
+    direct = dict(ui.message_details({"ts": NOW, "sender": "Sam", "text": "x", "incoming": True,
+                                      "hops": 0, "path": "", "region": "?"}))
+    _assert(direct["Hops"] == "0 (direct)" and direct["Region"] == "unknown", direct)
+    _assert("Path" not in direct, direct)
+
+
+def test_details_of_a_sent_message():
+    ui = _ui()
+    rows = dict(ui.message_details({"ts": NOW, "text": "hi", "incoming": False, "tx": True,
+                                    "heard": 3}))
+    _assert(rows["Status"] == "heard by 3 repeaters" and "From" not in rows, rows)
+    rows = dict(ui.message_details({"ts": NOW, "text": "hi", "incoming": False, "tx": True,
+                                    "delivered": True, "ack_ts": NOW + 2}))
+    _assert(rows["Status"] == "delivered 14:32", rows)
+    rows = dict(ui.message_details({"ts": NOW, "text": "hi", "incoming": False, "failed": True}))
+    _assert(rows["Status"] == "no ack after 4 tries", rows)
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

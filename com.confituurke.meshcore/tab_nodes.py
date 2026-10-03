@@ -122,6 +122,7 @@ class NodesTab(Tab):
             row = self._rows.get(r["pubkey"])
             if row is None:
                 row = T.ListRow(self.list, lambda pk=r["pubkey"], kind=r["kind"]: self.open_node(pk, kind))
+                T.on_long_press(row.obj, lambda pk=r["pubkey"]: self.menu(pk))
             row.set_avatar("node", r["hex"] + "\n" + KIND_TAGS.get(r["kind"], r["kind"]))
             row.title.set_text(r["name"])
             row.right.set_text(r["age"])
@@ -146,6 +147,10 @@ class NodesTab(Tab):
         if self.filt == "contacts":
             return "No saved contacts yet. Tap a companion to chat; it is saved as a contact."
         return "Nothing here yet."
+
+    def menu(self, pubkey):
+        import quick_actions
+        self.sheet = quick_actions.node_menu(self.activity, self.mgr, pubkey)
 
     def open_node(self, pubkey, kind):
         if kind == "chat":

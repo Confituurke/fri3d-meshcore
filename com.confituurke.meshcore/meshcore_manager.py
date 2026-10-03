@@ -3096,6 +3096,28 @@ class MeshCoreManager:
             else:
                 self._notify("dm", (rec["pubkey"], msg))
 
+    def _thread(self, key):
+        """(the message list, its event name) of a channel name or a contact pubkey."""
+        if key in self._dm_messages or key in self._contacts:
+            return self._dm_messages.setdefault(key, []), "dm"
+        return self._messages.setdefault(key, []), "message"
+
+    def delete_message(self, key, msg):
+        """Remove one message from a chat (by identity). False when it is not there."""
+        msgs, event = self._thread(key)
+        for i, m in enumerate(msgs):
+            if m is msg:
+                del msgs[i]
+                self._notify(event, (key, None))
+                return True
+        return False
+
+    def clear_history(self, key):
+        """Remove every message of a chat."""
+        msgs, event = self._thread(key)
+        del msgs[:]
+        self._notify(event, (key, None))
+
     def resend(self, key, msg):
         """Send a failed DM or an unheard channel message again, as a new message (fresh
         timestamp, attempt 0) that replaces the old one. Returns False for anything still

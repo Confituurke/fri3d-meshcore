@@ -6,7 +6,7 @@ typing; the quick replies step aside for it."""
 
 import lvgl as lv
 
-from mpos import Activity
+from mpos import Activity, Intent
 
 import ui_model
 import ui_theme as T
@@ -21,7 +21,7 @@ class _Bubble:
     corner squared, meta line. Ours: blue bubble on the right with its top-right corner
     squared and a status line (time · heard ×N with dots, delivered ✓, or failed ↻)."""
 
-    def __init__(self, parent, msg, show_sender, tz_s, on_resend, pad_ver):
+    def __init__(self, parent, msg, show_sender, tz_s, on_resend, pad_ver, on_menu=None):
         self.msg = msg
         own = not msg.get("incoming")
         self.obj = T.row(parent, lv.pct(100), lv.SIZE_CONTENT, 0,
@@ -54,6 +54,8 @@ class _Bubble:
             # "tap to resend" sits in the meta line, so it answers taps as well as the bubble.
             T.clickable(self.bubble, lambda: on_resend(self.msg), feedback=False)
             T.clickable(self.meta, lambda: on_resend(self.msg), feedback=False)
+        if on_menu is not None:
+            T.on_long_press(self.bubble, lambda: on_menu(self.msg))
         self._tz = tz_s
         self.update()
 
@@ -200,6 +202,34 @@ class ThreadActivity(Activity):
         if ui_model.can_resend(msg):
             self.mgr.resend(self.key(), msg)
 
+    # --- long press on a message ----------------------------------------------- #
+    def message_menu(self, msg):
+        actions = [("Details", lambda: self.open_details(msg))]
+        if msg.get("incoming") and self.show_sender():
+            actions.append(("Reply", lambda: self.reply(msg)))
+        if not msg.get("incoming"):
+            actions.append(("Send again", lambda: self.send_text(msg.get("text", ""))))
+        actions.append(("Delete", lambda: self.delete(msg), "danger"))
+        title = ui_model.display(msg.get("text", ""))
+        self.sheet = T.ActionSheet(title[:60], actions,
+                                   msg.get("sender") if msg.get("incoming") else "You")
+
+    def open_details(self, msg):
+        import routing_pages
+        intent = Intent(activity_class=routing_pages.MessageDetailsActivity)
+        intent.putExtra("key", self.key())
+        intent.putExtra("msg", msg)
+        self.startActivity(intent)
+
+    def reply(self, msg):
+        self._ta.set_text("@[%s] " % (msg.get("sender") or "?"))
+        self._ta.add_state(lv.STATE.FOCUSED)
+        self._kb.set_textarea(self._ta)
+
+    def delete(self, msg):
+        self.mgr.delete_message(self.key(), msg)
+        self.refresh(scroll=False)
+
     def _on_kb_show(self):
         self.quick.add_flag(lv.obj.FLAG.HIDDEN)
 
@@ -249,7 +279,8 @@ class ThreadActivity(Activity):
                 if (self._new_divider_at and i == len(msgs) - self._new_divider_at
                         and self._divider is None):
                     self._divider = self._new_divider()
-                b = _Bubble(self.list, m, self.show_sender(), self._tz, self._resend, self.pad_ver)
+                b = _Bubble(self.list, m, self.show_sender(), self._tz, self._resend, self.pad_ver,
+                            self.message_menu)
                 self._bubbles[id(m)] = b
                 added = True
             else:
@@ -262,6 +293,7 @@ class ThreadActivity(Activity):
         self.mgr.add_subscriber(self._on_event)
 
     def onPause(self, screen):
+        T.close_sheets()
         self.mgr.remove_subscriber(self._on_event)
         super().onPause(screen)
 
@@ -330,18 +362,22 @@ class DMChatActivity(ThreadActivity):
 
     def route_text(self):
         c = self._contact()
-        if not c.get("path"):
-            return "flood"
-        hops = (c.get("path_raw") or 0) & 63
-        return "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+        return ui_model.route_pill(self.mgr.route_mode(self.key()), c.get("path_raw"),
+                                   bool(c.get("path")))
 
     def build_header(self, scr):
         self.header = T.HeaderCompact(scr, self.title(), self.finish, self.route_text(),
-                                      self.forget_route)
+                                      self.open_route)
 
-    def forget_route(self):
-        """Tapping the route pill drops a stale direct route: the next message floods."""
-        self.mgr.reset_route(self.key())
+    def open_route(self):
+        """The route pill opens the routing page: auto, flood or a path typed by hand."""
+        import routing_pages
+        intent = Intent(activity_class=routing_pages.RoutingActivity)
+        intent.putExtra("pubkey", self.key())
+        self.startActivity(intent)
+
+    def onResume(self, screen):
+        super().onResume(screen)
         self.header.pill_label.set_text(self.route_text())
 
     def placeholder(self):
@@ -390,10 +426,31 @@ class ChannelInfoActivity(Activity):
         else:
             hint = "Public is the channel every MeshCore node listens to."
         T.label(body, hint, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        scope = T.card(body, filled=False, pad_ver=0, gap=0)
+        self._scope_row = T.SettingRow(scope, "Region scope", self._scope_text(name),
+                                       lambda: self.open_scope(name), first=True)
         if name != "Public":
             T.button(body, "Leave channel", lambda: self.leave(name), kind="outline",
                      h=52, width=lv.pct(100))
+        self._name = name
         self.setContentView(scr)
+
+    def _scope_text(self, name):
+        v = self.mgr.channel_scope(name)
+        if v == "default":
+            d = self.mgr.default_region()
+            return "default" + (" (#%s)" % d if d else "")
+        return "none" if v == "none" else "#" + v
+
+    def open_scope(self, name):
+        import routing_pages
+        intent = Intent(activity_class=routing_pages.ChannelScopeActivity)
+        intent.putExtra("channel", name)
+        self.startActivity(intent)
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        self._scope_row.value.set_text(self._scope_text(self._name))
 
     def leave(self, name):
         self.mgr.remove_channel(name)

@@ -512,3 +512,63 @@ def position_text(pos):
 
 def gps_text(status):
     return _GPS_STATES.get(status["state"], status["state"])
+
+
+# --- routes and message details --------------------------------------------- #
+
+def route_pill(mode, path_raw, has_path):
+    """The DM header's route: flood, direct or N hops; (forced) / (set) when chosen."""
+    if mode == "flood":
+        return "flood (forced)"
+    if not has_path:
+        return "flood"
+    hops = (path_raw or 0) & 63
+    text = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+    return text + " (set)" if mode == "manual" else text
+
+
+def hops_text(path_hex, size):
+    """"A1 → B2 → C3": a path's hops, `size` bytes each."""
+    step = 2 * (size or 1)
+    return " → ".join(path_hex[i:i + step].upper() for i in range(0, len(path_hex), step))
+
+
+def _when(ts, tz_s):
+    t = _gmtime(ts + tz_s)
+    return "%s %d %s %02d:%02d" % (_DAYS[t[6]], t[2], _MONTHS[t[1] - 1], t[3], t[4])
+
+
+def message_details(msg, tz_s=0):
+    """[(label, value)] for the message details page."""
+    rows = []
+    if msg.get("incoming"):
+        rows.append(("From", msg.get("sender") or "?"))
+    rows.append(("Sent", _when(msg.get("ts", 0), tz_s)))
+    if msg.get("incoming"):
+        hops = msg.get("hops")
+        if hops is not None:
+            rows.append(("Hops", "0 (direct)" if hops == 0 else str(hops)))
+        if msg.get("path"):
+            rows.append(("Path", hops_text(msg["path"], msg.get("hsize", 1))))
+            size = msg.get("hsize", 1)
+            rows.append(("Path hash", "%d byte%s" % (size, "" if size == 1 else "s")))
+        if msg.get("region"):
+            rows.append(("Region", "unknown" if msg["region"] == "?" else "#" + msg["region"]))
+        if msg.get("snr") is not None:
+            rows.append(("SNR", snr_text(msg["snr"]) + " dB"))
+        if msg.get("rssi") is not None:
+            rows.append(("RSSI", _minus("%d" % msg["rssi"]) + " dBm"))
+    else:
+        if msg.get("failed"):
+            status = "no ack after 4 tries"
+        elif msg.get("delivered"):
+            status = "delivered " + clock_text(msg.get("ack_ts") or msg.get("ts", 0), tz_s)
+        elif msg.get("heard"):
+            n = msg["heard"]
+            status = "heard by %d repeater%s" % (n, "" if n == 1 else "s")
+        elif msg.get("unheard"):
+            status = "not heard by a repeater"
+        else:
+            status = "sent" if msg.get("tx") else "sending"
+        rows.append(("Status", status))
+    return rows
