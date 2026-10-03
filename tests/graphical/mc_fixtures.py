@@ -64,11 +64,14 @@ def seed_chats(m):
 
 
 def open_app(tab=0):
+    """Start the app on a tab, named ("Radio") or by index."""
     import mpos.ui
     from mpos import AppManager, wait_for_render
     AppManager.start_app(APP)
     wait_for_render(20)
     act = mpos.ui.screen_stack[-1][0]
+    if isinstance(tab, str):
+        tab = [t[0] for t in act.TABS].index(tab)
     if tab:
         act.select(tab)
         wait_for_render(10)

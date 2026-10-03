@@ -60,7 +60,7 @@ class TestSetup(unittest.TestCase):
         ed = SharedPreferences(mc_fixtures.APP).edit()
         ed.put_bool("setup_done", True)
         ed.commit()
-        mc_fixtures.open_app(tab=2)
+        mc_fixtures.open_app(tab="Radio")
         self.assertTrue(click_label("Change"))
         wait_for_render(20)
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "SetupActivity")
@@ -81,7 +81,7 @@ class TestSettings(unittest.TestCase):
         wait_for_render(5)
 
     def test_settings_add_hashtag_channel(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         self.assertTrue(click_label("Add channel"))
         wait_for_render(20)
         page = mpos.ui.screen_stack[-1][0]
@@ -94,7 +94,7 @@ class TestSettings(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "#test"))
 
     def test_settings_add_channel_error_keeps_the_page(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         self.assertTrue(click_label("Add channel"))
         wait_for_render(20)
         page = mpos.ui.screen_stack[-1][0]
@@ -106,7 +106,7 @@ class TestSettings(unittest.TestCase):
         self.assertNotEqual(page._channel_msg.get_text(), "")
 
     def test_settings_edit_name_on_its_own_page(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         self.assertTrue(click_label("Name"))
         wait_for_render(20)
         page = mpos.ui.screen_stack[-1][0]
@@ -119,13 +119,13 @@ class TestSettings(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Indy two"))
 
     def test_settings_channel_row_opens_channel_info(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         self.assertTrue(click_label("Public"))
         wait_for_render(20)
         self.assertEqual(mc_fixtures.stack_names()[-1], "ChannelInfoActivity")
 
     def test_settings_service_switch(self):
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         sw = act._tab._service
         self.assertFalse(self.m.is_service_enabled())
         sw.add_state(lv.STATE.CHECKED)
@@ -134,7 +134,7 @@ class TestSettings(unittest.TestCase):
         self.assertTrue(self.m.is_service_enabled())
 
     def test_settings_shows_name_and_node_id(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         pub, _ = self.m.get_identity()
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), pub.hex()[:8].upper()))
 
@@ -160,7 +160,7 @@ class TestSoundSettings(unittest.TestCase):
         wait_for_render(5)
 
     def test_buzzer_switch_shows_the_choices(self):
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         tab = act._tab
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Buzzer"))
         self.assertTrue(tab._sound_rows.has_flag(lv.obj.FLAG.HIDDEN))
@@ -171,7 +171,7 @@ class TestSoundSettings(unittest.TestCase):
             self.assertIsNotNone(find_label_with_text(lv.screen_active(), text), text)
 
     def test_choose_kinds_and_all(self):
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         tab = act._tab
         self._flip(tab._sound["enabled"], True)
         self._flip(tab._sound["advert"], True)
@@ -194,7 +194,7 @@ class TestSoundSettings(unittest.TestCase):
 
     def test_all_survives_reopening_settings(self):
         self.m.set_sound_settings(enabled=True, all=True, channel=False)
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         tab = act._tab
         self.assertTrue(tab._sound["all"].has_state(lv.STATE.CHECKED))
         self.assertTrue(tab._sound["channel"].has_state(lv.STATE.CHECKED))
@@ -202,7 +202,7 @@ class TestSoundSettings(unittest.TestCase):
 
     def test_test_sound(self):
         rec = mc_fixtures.Recorder(self.m, "test_sound")
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         self._flip(act._tab._sound["enabled"], True)
         self.assertTrue(click_label("Play a test sound"))
         wait_for_render(5)
@@ -223,7 +223,7 @@ class TestContactAndReplySettings(unittest.TestCase):
         wait_for_render(5)
 
     def test_auto_add_switches(self):
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         sw = act._tab._auto["rptr"]
         sw.add_state(lv.STATE.CHECKED)
         sw.send_event(lv.EVENT.VALUE_CHANGED, None)
@@ -232,12 +232,12 @@ class TestContactAndReplySettings(unittest.TestCase):
         self.assertFalse(self.m.auto_add_settings()["chat"])
 
     def test_mention_sound_row(self):
-        act = mc_fixtures.open_app(tab=3)
+        act = mc_fixtures.open_app(tab="Settings")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Mentions"))
         self.assertTrue("mention" in act._tab._sound)
 
     def _open_replies(self):
-        mc_fixtures.open_app(tab=3)
+        mc_fixtures.open_app(tab="Settings")
         self.assertTrue(click_label("Quick replies"))
         wait_for_render(20)
         page = mpos.ui.screen_stack[-1][0]

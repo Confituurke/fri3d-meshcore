@@ -52,8 +52,9 @@ class TestShell(unittest.TestCase):
         act = mc_fixtures.open_app()
         scr = lv.screen_active()
         before = scr.get_child_count()
+        settings = [t[0] for t in act.TABS].index("Settings")
         for _ in range(3):
-            act.select(3)
+            act.select(settings)
             wait_for_render(5)
             act.select(0)
             wait_for_render(5)

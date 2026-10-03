@@ -22,7 +22,7 @@ class TestRadio(unittest.TestCase):
         wait_for_render(5)
 
     def test_noise_and_stats_render(self):
-        mc_fixtures.open_app(tab=2)
+        mc_fixtures.open_app(tab="Radio")
         scr = lv.screen_active()
         for text in ("−106", "6/h", "Peak", "−74", "TX air", "0.1 %", "dBm noise floor",
                      "RX on · last packet 40 s ago", "EU/UK (Narrow)",
@@ -31,14 +31,14 @@ class TestRadio(unittest.TestCase):
 
     def test_flood_advert_button(self):
         rec = mc_fixtures.Recorder(self.m, "advertise", result=(True, None))
-        mc_fixtures.open_app(tab=2)
+        mc_fixtures.open_app(tab="Radio")
         self.assertTrue(click_label("Flood advert"))
         wait_for_render(5)
         self.assertEqual(rec.calls[0][2], {"flood": True})
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Flood advert sent"))
 
     def test_change_opens_setup_step2(self):
-        mc_fixtures.open_app(tab=2)
+        mc_fixtures.open_app(tab="Radio")
         self.assertTrue(click_label("Change"))
         wait_for_render(20)
         act = mpos.ui.screen_stack[-1][0]
@@ -46,7 +46,7 @@ class TestRadio(unittest.TestCase):
         self.assertEqual(act.getIntent().extras.get("step"), 2)
 
     def test_timer_removed_on_tab_switch(self):
-        act = mc_fixtures.open_app(tab=2)
+        act = mc_fixtures.open_app(tab="Radio")
         radio = act._tab
         self.assertIsNotNone(radio._timer)
         act.select(0)
@@ -55,7 +55,7 @@ class TestRadio(unittest.TestCase):
 
 
     def test_recently_heard(self):
-        mc_fixtures.open_app(tab=2)
+        mc_fixtures.open_app(tab="Radio")
         scr = lv.screen_active()
         for text in ("Recently heard", "~6/min", "GRP", "11 hops"):
             self.assertIsNotNone(find_label_with_text(scr, text), text)

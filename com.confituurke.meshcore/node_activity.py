@@ -6,6 +6,8 @@ import lvgl as lv
 
 from mpos import Activity, Intent
 
+import map_model
+import map_view
 import ui_model
 import ui_theme as T
 import settings_pages
@@ -43,12 +45,16 @@ class NodeDetailActivity(Activity):
 
         actions = T.row(body, lv.pct(100), 48, 8)
         third = ("Chat", self.open_chat) if self.room else ("Routing", None)
+        on_map = self.open_map if map_model.positions([node]) else None
+        self.map_button = None
         for text, cb in (("Ping", lambda: self.mgr.ping(self.pk)),
-                         ("Trace", lambda: self.mgr.trace(self.pk)), third, ("Map", None)):
+                         ("Trace", lambda: self.mgr.trace(self.pk)), third, ("Map", on_map)):
             b = T.button(actions, text, cb or (lambda: None), "tile", 48, width=1, size=16)
             b.set_flex_grow(1)
+            if text == "Map":
+                self.map_button = b
             if cb is None:
-                T.disable(b)          # routing sheet and map come with the SD-card map
+                T.disable(b)          # no routing sheet yet; no map without a position
         self.result = T.label(body, "", 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
                               width=lv.pct(100))
 
@@ -111,6 +117,11 @@ class NodeDetailActivity(Activity):
 
     def admin_login(self):
         intent = Intent(activity_class=AdminLoginActivity)
+        intent.putExtra("pubkey", self.pk)
+        self.startActivity(intent)
+
+    def open_map(self):
+        intent = Intent(activity_class=map_view.MapActivity)
         intent.putExtra("pubkey", self.pk)
         self.startActivity(intent)
 
