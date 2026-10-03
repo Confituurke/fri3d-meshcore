@@ -284,11 +284,15 @@ def appearance_text():
     accent = prefs.get_string("accent", "system") or "system"
     parts = [n for n, v in ui_palette.THEMES if v == theme and v != "system"]
     parts += [n for n, v in ui_palette.ACCENTS if v == accent and v != "system"]
+    style = prefs.get_string("map_style", "system") or "system"
+    if style != "system":
+        parts.append("map " + ui_model.cap(style))
     return " \u00b7 ".join(parts) if parts else "System"
 
 
 class AppearanceActivity(Activity):
-    """Light or dark, and the accent colour: MicroPythonOS's by default, or the app's own."""
+    """Light or dark, the accent colour and the map style: MicroPythonOS's look and the
+    matching map by default, or the app's own choice."""
 
     SWATCH = 44
 
@@ -330,6 +334,39 @@ class AppearanceActivity(Activity):
         T.label(body, "System follows the light or dark mode and the colour set in "
                 "MicroPythonOS's settings.", 13, col=T.MUTED,
                 long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        self._map_section(body)
+
+    def _map_section(self, body):
+        import map_view
+        style = self.prefs.get_string("map_style", "system") or "system"
+        on_card = map_view.map_styles()
+        self.map_choices = [("System", "system"), ("Dark", "dark"), ("Light", "light")]
+        self.map_choices += [(ui_model.cap(n), n) for n in on_card if n not in ("dark", "light")]
+        if style not in [v for _, v in self.map_choices]:
+            self.map_choices.append((ui_model.cap(style), style))
+        T.section_label(body, "Map")
+        card = T.card(body, filled=False, pad_ver=0, pad_hor=14, gap=0)
+        for i, (name, value) in enumerate(self.map_choices):
+            row = T.row(card, lv.pct(100), 48, 8)
+            if i:
+                T.divider(row, lv.BORDER_SIDE.TOP)
+            on = value == style
+            T.label(row, name, 16, 600 if on else 400).set_flex_grow(1)
+            if value != "system" and value not in on_card:
+                T.label(row, "not on the card", 13, col=T.MUTED)
+            if on:
+                T.icon(row, "check", T.ACCENT)
+            T.clickable(row, lambda v=value: self.choose("map_style", v))
+        tiles = "%s/%%s/{z}/{x}/{y}.png" % map_view.MAPS
+        if style == "system":
+            where = "Follows the theme. Tiles go in %s and %s." % (tiles % "light", tiles % "dark")
+        else:
+            where = "Tiles go in %s%s." % (tiles % style, "" if style in on_card
+                                           else " (not on the card yet)")
+        self.map_note = T.label(body, where + " Each tile is a 256 px PNG in the usual web-map "
+                                "layout: zoom, then column, then row. Another style is just "
+                                "another folder next to these.", 13, col=T.MUTED,
+                                long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
 
     def choose(self, key, value):
         ed = self.prefs.edit()

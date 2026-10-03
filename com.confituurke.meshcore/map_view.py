@@ -1,4 +1,4 @@
-"""The map: offline tiles from the SD card (/sdcard/maps/dark, see map_tiles) with a pin for
+"""The map: offline tiles from the SD card (/sdcard/maps/<style>, see map_tiles) with a pin for
 every node that sent its position and a marker for our own. Drag to pan, + and - to zoom, the
 fit button shows all pins, the "me" button centres on us; a tap on a pin opens that node. Used
 by the Map tab, by MapActivity (a node's Map button, centred on that node) and by
@@ -14,8 +14,8 @@ import ui_model
 import ui_theme as T
 from meshcore_manager import MeshCoreManager
 
-ROOT = "/sdcard/maps/dark"
-LAND = 0x141B23                 # the style's land colour: shown where a tile is still loading
+MAPS = "/sdcard/maps"           # one folder per map style: <style>/{z}/{x}/{y}.png
+LAND = {"dark": 0x141B23, "light": 0xEEF1F4}   # land colour of our styles, shown while loading
 HOME = (50.64, 4.67, 8)         # Belgium, when no node has a position
 CREDIT = "© OpenMapTiles © OpenStreetMap contributors"
 PIN = 14
@@ -28,6 +28,39 @@ DRAG_PX = 8
 
 def pin_color(kind):
     return {"chat": T.ACCENT, "rptr": T.PIN_RPTR, "room": T.PIN_ROOM}.get(kind, T.MUTED)
+
+
+def map_styles():
+    """The style folders on the card, sorted (empty without a card)."""
+    import os
+    try:
+        names = []
+        for entry in os.ilistdir(MAPS):
+            if entry[1] == 0x4000 and not entry[0].startswith("."):
+                names.append(entry[0])
+        return sorted(names)
+    except OSError:
+        return []
+
+
+def chosen_style():
+    """The Map setting: "system" (follow the app's theme) or a style folder's name."""
+    from mpos import SharedPreferences
+    from meshcore_manager import MESHCORE_APP
+    return SharedPreferences(MESHCORE_APP).get_string("map_style", "system") or "system"
+
+
+def tile_style(choice=None, available=None):
+    """The style folder to draw: the chosen one, or for "system" the theme's (light or dark).
+    One that is not on the card gives way to the other of light/dark, then to any style."""
+    choice = chosen_style() if choice is None else choice
+    available = map_styles() if available is None else available
+    theme = "light" if (T.palette or {}).get("LIGHT") else "dark"
+    wanted = theme if choice == "system" else choice
+    for name in (wanted, theme, "dark" if theme == "light" else "light"):
+        if name in available:
+            return name
+    return available[0] if available else wanted
 
 
 def _read_file(path):
@@ -90,8 +123,9 @@ class MapView:
         self.mgr = mgr
         self.w, self.h = w, h
         self.open_node = open_node
+        self.style = tile_style()
         self.obj = T.box(parent, w, h)
-        T.fill(self.obj, LAND)
+        T.fill(self.obj, LAND.get(self.style, T.BG))
         self.obj.add_flag(lv.obj.FLAG.CLICKABLE)
         self.obj.add_event_cb(self._on_press, lv.EVENT.PRESSED, None)
         self.obj.add_event_cb(self._on_pressing, lv.EVENT.PRESSING, None)
@@ -126,7 +160,7 @@ class MapView:
         credit.set_style_pad_hor(6, lv.PART.MAIN)
         credit.set_style_pad_ver(2, lv.PART.MAIN)
         credit.align(lv.ALIGN.BOTTOM_LEFT, 4, -4)
-        self.store = map_tiles.TileStore(ROOT, _read_file, capacity=20,
+        self.store = map_tiles.TileStore(MAPS + "/" + self.style, _read_file, capacity=20,
                                          on_ready=self._on_tile)
         self.store.start()
         self._timer = lv.timer_create(lambda t: self._tick(), 40, None)
@@ -234,7 +268,7 @@ class MapView:
         if self.store.status == "nocard":
             text = "No SD card. The map's tiles are read from the card."
         elif all(s.entry is not None and s.entry[0] == "none" for s in self._slots if s.key):
-            text = "No map tiles here. Copy maps/dark to the SD card."
+            text = "No map tiles here. Copy maps/%s to the SD card." % self.style
         else:
             text = ""
         if text:

@@ -13,14 +13,14 @@ class TestLocation(unittest.TestCase):
     def setUp(self):
         import map_view
         self.map_view = map_view
-        self.root = map_view.ROOT
-        map_view.ROOT = "/nonexistent/maps/dark"
+        self.maps = map_view.MAPS
+        map_view.MAPS = "/nonexistent/maps"
         self.m = mc_fixtures.fresh_manager()
         self.m.clear_position()
         self.m.set_gps_enabled(False)
 
     def tearDown(self):
-        self.map_view.ROOT = self.root
+        self.map_view.MAPS = self.maps
         mpos.ui.remove_and_stop_all_activities()
         wait_for_render(5)
 

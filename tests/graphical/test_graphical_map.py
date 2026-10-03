@@ -65,17 +65,24 @@ class TestMap(unittest.TestCase):
     def setUp(self):
         import map_view
         self.map_view = map_view
-        self.root = map_view.ROOT
-        map_view.ROOT = "/nonexistent/maps/dark"
+        self.maps = map_view.MAPS
+        map_view.MAPS = "/nonexistent/maps"
         self.m = mc_fixtures.fresh_manager()
         mc_fixtures.seed_nodes(self.m)
         self.m._nodes[mc_fixtures.BOB].update(lat=BRUSSELS[0], lon=BRUSSELS[1])
         self.m._nodes[mc_fixtures.GENT].update(lat=GENT[0], lon=GENT[1])
 
     def tearDown(self):
-        self.map_view.ROOT = self.root
+        self.map_view.MAPS = self.maps
+        self.set_theme("system")
         mpos.ui.remove_and_stop_all_activities()
         wait_for_render(5)
+
+    def set_theme(self, theme):
+        from mpos import SharedPreferences
+        ed = SharedPreferences(mc_fixtures.APP).edit()
+        ed.put_string("theme", theme)
+        ed.commit()
 
     def test_tab_shows_a_pin_per_positioned_node(self):
         act = mc_fixtures.open_app(tab="Map")
@@ -110,16 +117,93 @@ class TestMap(unittest.TestCase):
         self.assertEqual(len(view._pin_model), 2)
 
     def test_tiles_come_from_the_folder_stretched_from_an_ancestor(self):
-        _mkdirs(TILES + "/0/0")
-        with open(TILES + "/0/0/0.png", "wb") as f:
+        _mkdirs(TILES + "/dark/0/0")
+        with open(TILES + "/dark/0/0/0.png", "wb") as f:
             f.write(tile_png())
-        self.map_view.ROOT = TILES
+        self.set_theme("dark")
+        self.map_view.MAPS = TILES
         act = mc_fixtures.open_app(tab="Map")
         view = act._tab.view
         shown = lambda: all(s.entry is not None and s.entry[0] == "rgb565"
                             for s in view._slots if s.key is not None)
         self.assertTrue(wait_until(shown))
         self.assertTrue(view.note.has_flag(lv.obj.FLAG.HIDDEN))
+
+    def test_the_light_theme_reads_the_light_tiles(self):
+        import ui_palette
+        import ui_theme as T
+        for theme in ("dark", "light"):
+            _mkdirs(TILES + "/%s/0/0" % theme)
+            with open(TILES + "/%s/0/0/0.png" % theme, "wb") as f:
+                f.write(tile_png())
+        self.map_view.MAPS = TILES
+        self.set_theme("light")
+        act = mc_fixtures.open_app(tab="Map")
+        view = act._tab.view
+        self.assertEqual(view.store.root, TILES + "/light")
+        self.assertEqual(T.rgb(view.obj.get_style_bg_color(lv.PART.MAIN)),
+                         self.map_view.LAND["light"])
+
+    def test_a_missing_tile_set_falls_back_to_the_other(self):
+        _mkdirs(TILES + "/dark/0/0")
+        with open(TILES + "/dark/0/0/0.png", "wb") as f:
+            f.write(tile_png())
+        try:
+            os.remove(TILES + "/light/0/0/0.png")
+            os.rmdir(TILES + "/light/0/0")
+            os.rmdir(TILES + "/light/0")
+            os.rmdir(TILES + "/light")
+        except OSError:
+            pass
+        self.map_view.MAPS = TILES
+        self.set_theme("light")
+        act = mc_fixtures.open_app(tab="Map")
+        self.assertEqual(act._tab.view.store.root, TILES + "/dark")
+
+    def set_map(self, style):
+        from mpos import SharedPreferences
+        ed = SharedPreferences(mc_fixtures.APP).edit()
+        ed.put_string("map_style", style)
+        ed.commit()
+
+    def test_the_map_setting_overrides_the_theme(self):
+        for style in ("dark", "light", "topo"):
+            _mkdirs(TILES + "/%s/0/0" % style)
+            with open(TILES + "/%s/0/0/0.png" % style, "wb") as f:
+                f.write(tile_png())
+        self.map_view.MAPS = TILES
+        self.set_theme("dark")
+        try:
+            for choice, expect in (("light", "light"), ("topo", "topo"), ("gone", "dark"),
+                                   ("system", "dark")):
+                self.set_map(choice)
+                act = mc_fixtures.open_app(tab="Map")
+                self.assertEqual(act._tab.view.store.root, TILES + "/" + expect, choice)
+                mpos.ui.remove_and_stop_all_activities()
+                wait_for_render(5)
+        finally:
+            self.set_map("system")
+
+    def test_appearance_page_lists_the_maps_on_the_card(self):
+        import settings_pages
+        from mpos import Intent
+        from mpos.activity_navigator import ActivityNavigator
+        _mkdirs(TILES + "/topo/0/0")
+        self.map_view.MAPS = TILES
+        try:
+            intent = Intent(activity_class=settings_pages.AppearanceActivity, app_fullname=mc_fixtures.APP)
+            ActivityNavigator.startActivity(intent)
+            wait_for_render(20)
+            page = mpos.ui.screen_stack[-1][0]
+            self.assertEqual([v for _, v in page.map_choices][:3], ["system", "dark", "light"])
+            self.assertIn("topo", [v for _, v in page.map_choices])
+            self.assertIn(TILES + "/light/{z}/{x}/{y}.png", page.map_note.get_text())
+            page.choose("map_style", "topo")
+            wait_for_render(5)
+            self.assertIn(TILES + "/topo/{z}/{x}/{y}.png", page.map_note.get_text())
+            self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Topo"))
+        finally:
+            self.set_map("system")
 
     def test_node_detail_map_button_opens_the_map_on_that_node(self):
         from mpos import Intent
