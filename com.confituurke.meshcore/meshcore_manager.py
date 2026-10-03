@@ -30,7 +30,7 @@ from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
                              PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE)
 from meshcore_channel import decode_group_text, encode_group_text, PUBLIC_CHANNEL, Channel
 from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_message,
-                             assemble_advert_payload, ADV_TYPE_CHAT, ADV_TYPE_ROOM,
+                             assemble_advert_payload, ADV_TYPE_CHAT, ADV_TYPE_ROOM, ADV_TYPE_NAMES,
                              contact_share_uri)
 # Import siblings at module load (while the app dir is on sys.path) and reference them by
 # attribute later. A lazy `from meshcore_crypto import ...` inside a function runs after the
@@ -106,6 +106,10 @@ FLUSH_EVERY_MS = 5000   # coalesce history/unread writes while the worker runs
 DM_HISTORY_FILE = "dm_history.json"         # {"h": {pubkey_hex: [msg]}}
 CH_HISTORY_FILE = "channel_history.json"    # {"ch": {channel_name: [msg]}}
 UNREAD_FILE = "unread.json"                 # {"u": {key: count}, "m": [keys with a mention]}
+NODES_FILE = "nodes.json"                   # {"n": {pubkey: node}} heard by advert
+NODES_FLUSH_MS = 60000      # heard nodes change with every advert: write them at most this often
+_NODE_STORED = ("name", "type", "lat", "lon", "timestamp", "hops", "snr", "rssi", "path",
+                "route", "verified", "heard_ts", "seq")
 _CH_STORED = ("ts", "sender", "text", "incoming", "snr", "hops", "tx", "heard", "unheard")
 MAX_NODES = 100         # learned-nodes cap (RAM): companions, repeaters, rooms, sensors
 # Resends. A byte-identical packet is useless: every node keeps a "seen" table of packet
@@ -251,6 +255,7 @@ class MeshCoreManager:
         self._load_channels()
         self._seed_default_channels()
         self._load_contacts()
+        self._load_nodes()
         self._load_channel_history()
         self._load_unread()
 
@@ -945,7 +950,7 @@ class MeshCoreManager:
                 meshcore_radio.lock_release("meshcore")
             finally:
                 self._radio_lock.release()
-        self._flush_dirty()   # persist any coalesced history before going idle
+        self._flush_dirty(force=True)   # persist anything coalesced before going idle
         print("MeshCoreManager: stopped")
 
     # --- per-contact shared-secret precompute (keep ECDH off UI/RX threads) - #
@@ -1393,12 +1398,17 @@ class MeshCoreManager:
         # cap learned nodes (RAM): evict the least-recently-heard one
         if new_node and len(self._nodes) > MAX_NODES:
             self._evict_oldest_node()
-        # if this node is already a contact, refresh its live signal / last-heard
-        # (contact *details* are persisted separately; live radio info stays in RAM).
+        node["heard_ts"] = self._timestamp()
+        self._nodes_dirty = True        # written with the next coalesced flush
+        # if this node is already a contact, refresh its live signal, position and last-heard
         c = self._contacts.get(adv["pubkey"])
         if c is not None:
             c["rssi"] = rssi
             c["seq"] = self._seq
+            c["heard_ts"] = node["heard_ts"]
+            if adv.get("lat") is not None and adv.get("lon") is not None:
+                c["lat"], c["lon"] = adv["lat"], adv["lon"]
+            self._contacts_dirty = True
             # a contact's name tracks its advertised name (same pubkey) -> auto-rename on change
             new_name = adv.get("name")
             if new_name and new_name != c.get("name"):
@@ -2322,7 +2332,7 @@ class MeshCoreManager:
         return pubkey_hex in self._contacts
 
     def get_learned_companions(self):
-        """Nodes heard via advert this session (RAM only), most recent first: companions,
+        """Nodes heard via advert (kept across restarts), most recent first: companions,
         repeaters and rooms. Adding a companion makes it a persisted contact you can chat
         with."""
         return sorted(self._nodes.values(), key=lambda n: n.get("seq", 0), reverse=True)
@@ -2345,6 +2355,9 @@ class MeshCoreManager:
             "secret": None,
             "rssi": node.get("rssi"),
             "seq": node.get("seq", 0),
+            "lat": node.get("lat"),
+            "lon": node.get("lon"),
+            "heard_ts": node.get("heard_ts"),
         }
         self._dm_messages.setdefault(pubkey_hex, [])
         self._save_contacts()
@@ -2397,10 +2410,45 @@ class MeshCoreManager:
                     "path": self._unhex(entry.get("path")),
                     "path_raw": entry.get("path_raw", 0),
                     "sync_since": entry.get("sync_since", 0),
+                    "lat": entry.get("lat"),
+                    "lon": entry.get("lon"),
+                    "heard_ts": entry.get("heard_ts"),
                 }
                 self._dm_messages[pub_hex] = self._clean_history(histories.get(pub_hex), dm=True)
             except Exception as e:
                 print("MeshCore: skipping bad contact %r: %s" % (pub_hex, e))
+
+    def _load_nodes(self):
+        """The nodes heard before the restart. Their age comes back from the time they were
+        heard; without a set clock that is not known, and they count as a day old."""
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS, filename=NODES_FILE).get_dict("n", {}) or {}
+        except Exception:
+            return
+        if not isinstance(saved, dict):
+            return
+        now_ms = self._now_ms()
+        now_s = unix_time()
+        clock_ok = now_s >= CLOCK_VALID_AFTER
+        for pk, entry in saved.items():
+            try:
+                if len(pk) != 64 or not isinstance(entry, dict):
+                    continue
+                node = {k: entry[k] for k in _NODE_STORED if k in entry}
+                node["pubkey"] = pk
+                node["id"] = pk[0:2]
+                node["type_name"] = ADV_TYPE_NAMES.get(node.get("type"), "?")
+                age_s = 86400
+                if clock_ok and node.get("heard_ts"):
+                    age_s = max(0, now_s - node["heard_ts"])
+                node["heard_ms"] = tadd(now_ms, -min(age_s, 5 * 86400) * 1000)
+                self._nodes[pk] = node
+                self._seq = max(self._seq, node.get("seq", 0))
+            except Exception as e:
+                print("MeshCore: skipping stored node %r: %s" % (pk, e))
+        while len(self._nodes) > MAX_NODES:
+            self._evict_oldest_node()
 
     def _save_contacts(self):
         try:
@@ -2410,6 +2458,9 @@ class MeshCoreManager:
                 entry = {"name": c["name"], "type": c.get("type", ADV_TYPE_CHAT)}
                 if c.get("sync_since"):                   # room: newest post we have
                     entry["sync_since"] = c["sync_since"]
+                for k in ("lat", "lon", "heard_ts"):
+                    if c.get(k) is not None:
+                        entry[k] = c[k]
                 path = c.get("path")
                 if path:                                  # the learned direct route
                     entry["path"] = path.hex()
@@ -2501,13 +2552,32 @@ class MeshCoreManager:
             return
         self._flush_dirty()
 
-    def _flush_dirty(self):
-        """Persist DM history, channel history and unread state that changed."""
+    def _flush_dirty(self, force=False):
+        """Persist DM history, channel history, unread state, contacts and heard nodes that
+        changed (heard nodes at most every NODES_FLUSH_MS unless forced)."""
         self._last_flush_ms = self._now_ms()
         try:
             from mpos import SharedPreferences
         except Exception:
             return
+        if getattr(self, "_contacts_dirty", False):
+            self._contacts_dirty = False
+            self._save_contacts()
+        last = getattr(self, "_nodes_flush_ms", None)
+        if getattr(self, "_nodes_dirty", False) and (
+                force or last is None or tdiff(self._last_flush_ms, last) >= NODES_FLUSH_MS):
+            self._nodes_dirty = False
+            self._nodes_flush_ms = self._last_flush_ms
+            try:
+                data = {}
+                for pk, n in self._nodes.items():
+                    data[pk] = {k: n[k] for k in _NODE_STORED if n.get(k) is not None}
+                ed = self._editor(NODES_FILE)
+                ed.put_dict("n", data)
+                self._commit(ed)
+            except Exception as e:
+                self._nodes_dirty = True
+                print("MeshCore: save nodes error:", repr(e))
         if self._dirty_history or getattr(self, "_migrate_dm_history", False):
             pending = set(self._dirty_history)
             self._dirty_history.clear()
