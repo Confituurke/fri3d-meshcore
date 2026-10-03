@@ -67,10 +67,22 @@ def font(size, weight=400, mono=False, emoji=False):
     key = (size, weight, mono, emoji)
     f = _fonts.get(key)
     if f is None:
-        name = _FILES[(mono, weight)]
-        f = FontManager.getFont(size=size, ttf="M:%s/fonts/%s" % (_DIR, name), emoji=emoji)
+        path = "M:%s/fonts/%s" % (_DIR, _FILES[(mono, weight)])
+        base = FontManager.getFont(size=size, ttf=path)
+        _no_kerning(base)
+        f = FontManager.getFont(size=size, ttf=path, emoji=True) if emoji else base
         _fonts[key] = f
     return f
+
+
+def _no_kerning(f):
+    """LVGL 9.4's tiny_ttf kerning cache orders its entries with an 8-bit compare of glyph
+    index differences: once it holds 256 letter pairs and has to evict, a lookup fails and
+    eviction loops forever (the UI freezes). Without kerning that cache is never used."""
+    try:
+        lv.font_set_kerning(f, lv.FONT_KERNING.NONE)
+    except AttributeError:
+        f.kerning = lv.FONT_KERNING.NONE
 
 
 # --- basic building blocks ------------------------------------------------- #
