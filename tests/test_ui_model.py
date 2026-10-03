@@ -392,5 +392,25 @@ def test_details_of_a_sent_message():
     rows = dict(ui.message_details({"ts": NOW, "text": "hi", "incoming": False, "failed": True}))
     _assert(rows["Status"] == "no ack after 4 tries", rows)
 
+
+def test_path_hops_are_named_after_known_repeaters():
+    ui = _ui()
+    nodes = [{"pubkey": "a1" + "00" * 31, "name": "BE-KOR-Beekstraat", "type": 2},
+             {"pubkey": "c3" + "11" * 31, "name": "Room", "type": 3},
+             {"pubkey": "c3" + "22" * 31, "name": "Other", "type": 2}]
+    hops = ui.path_hops("a1b2c3", 1, nodes)
+    _assert(hops == [("A1", "BE-KOR-Beekstraat"), ("B2", None), ("C3", None)], hops)
+    msg = {"ts": NOW, "sender": "Sam", "text": "x", "incoming": True, "hops": 3,
+           "path": "a1b2c3", "hsize": 1}
+    rows = dict(ui.message_details(msg, 0, nodes))
+    _assert(rows["Path"] == "A1 BE-KOR-Beekstraat \u2192 B2 \u2192 C3", rows["Path"])
+
+
+def test_a_path_not_recorded_is_said_so():
+    ui = _ui()
+    rows = dict(ui.message_details({"ts": NOW, "sender": "Sam", "text": "x", "incoming": True,
+                                    "hops": 2}))
+    _assert(rows["Path"] == "not recorded", rows)
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

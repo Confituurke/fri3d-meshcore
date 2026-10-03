@@ -139,7 +139,8 @@ class MessageDetailsActivity(_Page):
                 long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
         grid = T.card(body, filled=False, pad_ver=0, pad_hor=14, gap=0)
         self.rows = {}
-        for i, (k, v) in enumerate(ui_model.message_details(msg, T.tz_offset_s())):
+        nodes = list(self.mgr.get_learned_companions()) + list(self.mgr.get_contacts())
+        for i, (k, v) in enumerate(ui_model.message_details(msg, T.tz_offset_s(), nodes)):
             r = T.row(grid, lv.pct(100), lv.SIZE_CONTENT, 8)
             r.set_style_pad_ver(12, lv.PART.MAIN)
             if i:

@@ -533,13 +533,25 @@ def hops_text(path_hex, size):
     return " → ".join(path_hex[i:i + step].upper() for i in range(0, len(path_hex), step))
 
 
+def path_hops(path_hex, size, nodes=()):
+    """[(hop hex, name or None)]: each hop with the node whose key starts with it, when
+    exactly one known node does."""
+    step = 2 * (size or 1)
+    out = []
+    for i in range(0, len(path_hex), step):
+        h = path_hex[i:i + step].lower()
+        hits = [n for n in nodes if (n.get("pubkey") or "").lower().startswith(h)]
+        out.append((h.upper(), display(hits[0].get("name")) or None if len(hits) == 1 else None))
+    return out
+
+
 def _when(ts, tz_s):
     t = _gmtime(ts + tz_s)
     return "%s %d %s %02d:%02d" % (_DAYS[t[6]], t[2], _MONTHS[t[1] - 1], t[3], t[4])
 
 
-def message_details(msg, tz_s=0):
-    """[(label, value)] for the message details page."""
+def message_details(msg, tz_s=0, nodes=()):
+    """[(label, value)] for the message details page; `nodes` name the path's hops."""
     rows = []
     if msg.get("incoming"):
         rows.append(("From", msg.get("sender") or "?"))
@@ -549,9 +561,13 @@ def message_details(msg, tz_s=0):
         if hops is not None:
             rows.append(("Hops", "0 (direct)" if hops == 0 else str(hops)))
         if msg.get("path"):
-            rows.append(("Path", hops_text(msg["path"], msg.get("hsize", 1))))
+            hops_named = path_hops(msg["path"], msg.get("hsize", 1), nodes)
+            rows.append(("Path", " \u2192 ".join(h + (" " + n if n else "")
+                                                  for h, n in hops_named)))
             size = msg.get("hsize", 1)
             rows.append(("Path hash", "%d byte%s" % (size, "" if size == 1 else "s")))
+        elif hops:
+            rows.append(("Path", "not recorded"))
         if msg.get("region"):
             rows.append(("Region", "unknown" if msg["region"] == "?" else "#" + msg["region"]))
         if msg.get("snr") is not None:
