@@ -64,7 +64,7 @@ class ChatsTab(Tab):
             row = self._rows.get(r["key"])
             if row is None:
                 row = T.ListRow(self.list, lambda k=r["key"], kind=r["kind"]: self.open_chat(k, kind))
-            row.set_avatar("channel" if r["kind"] == "channel" else "dm", r["initials"])
+            row.set_avatar(r["kind"], r["initials"])
             row.title.set_text(r["title"])
             row.right.set_text(r["time"])
             row.line2.set_text(r["preview"])

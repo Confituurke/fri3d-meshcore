@@ -321,6 +321,10 @@ class DMChatActivity(ThreadActivity):
     def _contact(self):
         return self.mgr.get_contact(self.key()) or {}
 
+    def show_sender(self):
+        # a room server's chat holds posts from many people
+        return self._contact().get("type") == 3
+
     def title(self):
         c = self._contact()
         return ui_model.display(c.get("name")) or self.key()[:8]

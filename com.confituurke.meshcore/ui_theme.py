@@ -531,7 +531,10 @@ def button(parent, text, on_click, kind="primary", h=52, sub=None, width=None, s
     radius = 12 if h >= 52 else (10 if h >= 44 else 8)
     if kind == "primary":
         fill(b, ACCENT, radius)
-        fg, sub_fg, weight = BG, BG, 700
+        fg, sub_fg, weight = BG, BG, 700 if h >= 52 else 600
+    elif kind == "tile":
+        fill(b, SURFACE, 10, OUTLINE)
+        fg, sub_fg, weight = TEXT, MUTED, 400
     elif kind == "outline":
         outline(b, OUTLINE, radius, 2)
         fg, sub_fg, weight = TEXT, MUTED, 600 if sub else 400
@@ -543,6 +546,41 @@ def button(parent, text, on_click, kind="primary", h=52, sub=None, width=None, s
         label(b, sub, 13, col=sub_fg)
     clickable(b, on_click, feedback=kind != "primary")
     return b
+
+
+def disable(b):
+    """A button that is shown but does nothing yet: muted text, no taps."""
+    b.remove_flag(lv.obj.FLAG.CLICKABLE)
+    for i in range(b.get_child_count()):
+        b.get_child(i).set_style_text_color(color(MUTED), lv.PART.MAIN)
+        b.get_child(i).set_style_text_opa(lv.OPA._50, lv.PART.MAIN)
+
+
+class Segmented:
+    """A 44 px segmented control: the selected segment is #2C3846 with 600 text."""
+
+    def __init__(self, parent, labels, on_select, selected=0):
+        self.obj = row(parent, lv.pct(100), 44, 0)
+        fill(self.obj, SURFACE, 10)
+        self.obj.set_style_pad_all(3, lv.PART.MAIN)
+        self._segs = []
+        for i, text in enumerate(labels):
+            seg = row(self.obj, 1, 38, 0, lv.FLEX_ALIGN.CENTER)
+            seg.set_flex_grow(1)
+            seg.set_style_radius(8, lv.PART.MAIN)
+            lb = label(seg, text, 16, col=MUTED)
+            clickable(seg, lambda i=i: on_select(i), feedback=False)
+            lb.add_flag(lv.obj.FLAG.EVENT_BUBBLE)
+            self._segs.append((seg, lb))
+        self.set_selected(selected)
+
+    def set_selected(self, idx):
+        for i, (seg, lb) in enumerate(self._segs):
+            on = i == idx
+            seg.set_style_bg_color(color(OUTLINE), lv.PART.MAIN)
+            seg.set_style_bg_opa(lv.OPA.COVER if on else lv.OPA.TRANSP, lv.PART.MAIN)
+            lb.set_style_text_color(color(TEXT if on else MUTED), lv.PART.MAIN)
+            lb.set_style_text_font(font(16, 600 if on else 400), lv.PART.MAIN)
 
 
 def advert_button(parent, on_click):

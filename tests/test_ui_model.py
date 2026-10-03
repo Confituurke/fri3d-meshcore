@@ -251,5 +251,68 @@ def test_signal_report_and_quick_replies():
     _assert(ui.signal_report({"snr": -2.0, "hops": 1}) == "SNR −2.0 · 1 hop")
 
 
+# --- repeaters and room servers -------------------------------------------- #
+
+def test_status_rows():
+    ui = _ui()
+    data = {"battery_mv": 4020, "uptime_s": 1051200, "noise_floor": -112, "last_snr": -3.5,
+            "airtime_s": 22151, "rx_airtime_s": 67507, "packets_rx": 18233, "packets_tx": 9120}
+    rows = ui.status_rows(data)
+    _assert(rows == [("Battery", "4.02 V"), ("Uptime", "12 d 4 h"), ("Noise floor", "\u2212112 dBm"),
+                     ("Last SNR", "\u22123.5 dB"), ("TX airtime", "2.1 %"), ("RX airtime", "6.4 %"),
+                     ("Packets RX", "18 233"), ("Packets TX", "9 120")], rows)
+    room = ui.status_rows(dict(data, posted=12, rx_airtime_s=None), room=True)
+    _assert(("Posts", "12") in room and not any(k == "RX airtime" for k, v in room), room)
+    _assert(ui.status_rows({"uptime_s": 3700}) == [("Uptime", "1 h 1 min")])
+
+
+def test_neighbour_rows_resolve_names():
+    ui = _ui()
+    nodes = {"3a" + "44" * 31: {"name": "Aalst-Kerk"}}
+    rows = ui.neighbour_rows([{"prefix": "3a444444", "secs_ago": 120, "snr": 4.25},
+                              {"prefix": "c0ffee00", "secs_ago": 7200, "snr": -2.0}], nodes)
+    _assert(rows == [{"name": "Aalst-Kerk", "hex": "3A", "detail": "SNR 4.2 \u00b7 2 min ago"},
+                     {"name": "C0FFEE00", "hex": "C0", "detail": "SNR \u22122.0 \u00b7 2 h ago"}], rows)
+
+
+def test_telemetry_rows():
+    ui = _ui()
+    rows = ui.telemetry_rows([{"channel": 1, "kind": "voltage", "value": 4.02},
+                              {"channel": 1, "kind": "temperature", "value": 23.5},
+                              {"channel": 1, "kind": "gps", "value": (51.0704, 3.718, 12.0)},
+                              {"channel": 2, "kind": "humidity", "value": 50.5}])
+    _assert(rows == [("Voltage", "4.02 V"), ("Temperature", "23.5 \u00b0C"),
+                     ("Location", "51.0704, 3.7180"), ("Humidity \u00b7 2", "50.5 %")], rows)
+
+
+def test_ping_and_trace_lines():
+    ui = _ui()
+    ping = {"hop_snrs": [6.0], "final_snr": 5.5, "rtt_ms": 350, "hashes": [0xF1]}
+    _assert(ui.trace_text(ping, "ping") == "Ping 350 ms \u00b7 SNR there 6.0 \u00b7 back 5.5")
+    tr = {"hop_snrs": [6.0, 4.0, 5.5], "final_snr": 7.0, "rtt_ms": 1200, "hashes": [0x3A, 0xF1, 0x3A]}
+    _assert(ui.trace_text(tr, "trace") == "3A 6.0 \u203a F1 4.0 \u203a 3A 5.5 \u203a you 7.0 \u00b7 1.2 s")
+
+
+def test_login_line():
+    ui = _ui()
+    _assert(ui.login_line({"state": "idle"}) == ("Not logged in", ui.MUTED))
+    _assert(ui.login_line({"state": "pending", "pending": {"kind": "login"}}) == ("Logging in\u2026", ui.MUTED))
+    _assert(ui.login_line({"state": "ok", "role": "guest"}) == ("Guest login", ui.MUTED))
+    _assert(ui.login_line({"state": "ok", "role": "admin"}) == ("Admin login", ui.OK))
+    _assert(ui.login_line({"state": "failed", "error": "no answer from X"}) == ("no answer from X", ui.FAIL_TEXT))
+
+
+def test_chats_leave_repeaters_out_and_show_rooms():
+    m, alex = _seeded()
+    ui = _ui()
+    m.add_contact("f1" + "33" * 31, "Gent-Noord", 2)
+    m.add_contact("7c" + "55" * 31, "Gent BBS", 3)
+    rows = {r["title"]: r for r in ui.chat_rows(m, NOW)}
+    _assert("Gent-Noord" not in rows, rows.keys())
+    _assert(rows["Gent BBS"]["kind"] == "room", rows["Gent BBS"])
+    _assert([r["title"] for r in ui.chat_rows(m, NOW, "direct")] == ["Alex", "Gent BBS"] or
+            [r["title"] for r in ui.chat_rows(m, NOW, "direct")] == ["Gent BBS", "Alex"])
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

@@ -145,15 +145,20 @@ def chat_rows(mgr, now_s, filt="all", tz_s=0):
                          "last": last})
     if filt != "channels":
         for c in mgr.get_contacts():
+            ctype = c.get("type", 1)
+            if ctype in (2, 4):          # repeaters and sensors are nodes, not chats
+                continue
             msgs = mgr.get_dm_messages(c["pubkey"])
             last = msgs[-1] if msgs else None
             name = display(c.get("name")) or c["id"]
-            rows.append({"key": c["pubkey"], "kind": "dm", "title": name,
-                         "initials": initials(name), "last": last})
+            rows.append({"key": c["pubkey"], "kind": "room" if ctype == 3 else "dm",
+                         "title": name, "initials": initials(name), "last": last})
     for r in rows:
         last = r.pop("last")
         r["ts"] = last.get("ts", 0) if last else 0
         r["preview"] = _preview(last, r["kind"] == "dm")
+        if r["kind"] == "room" and last and last.get("incoming") and last.get("sender"):
+            r["preview"] = "%s: %s" % (display(last["sender"]), display(last.get("text", "")))
         r["time"] = time_text(r["ts"], now_s, tz_s) if last else ""
         r["unread"] = mgr.get_unread(r["key"])
         r["mention"] = mgr.get_mention(r["key"])
@@ -329,3 +334,121 @@ def signal_report(msg):
     hops = msg.get("hops") or 0
     s = "SNR " + snr_text(msg["snr"]) if msg.get("snr") is not None else "no SNR"
     return "%s · %d hop%s" % (s, hops, "" if hops == 1 else "s")
+
+
+# --- repeaters and room servers ---------------------------------------------- #
+
+def _thousands(n):
+    s = "%d" % n
+    out = ""
+    while len(s) > 3:
+        out = " " + s[-3:] + out
+        s = s[:-3]
+    return s + out
+
+
+def uptime_text(seconds):
+    d, rest = divmod(int(seconds), 86400)
+    h, rest = divmod(rest, 3600)
+    m = rest // 60
+    if d:
+        return "%d d %d h" % (d, h)
+    if h:
+        return "%d h %d min" % (h, m)
+    return "%d min" % m
+
+
+def status_rows(data, room=False):
+    """(label, value) pairs for a server's status, in the canvas's order; missing fields
+    (older firmware) are left out."""
+    rows = []
+    up = data.get("uptime_s")
+    if data.get("battery_mv") is not None:
+        rows.append(("Battery", "%.2f V" % (data["battery_mv"] / 1000)))
+    if up is not None:
+        rows.append(("Uptime", uptime_text(up)))
+    if data.get("noise_floor") is not None:
+        rows.append(("Noise floor", _minus("%d" % data["noise_floor"]) + " dBm"))
+    if data.get("last_snr") is not None:
+        rows.append(("Last SNR", snr_text(data["last_snr"]) + " dB"))
+    for key, label in (("airtime_s", "TX airtime"), ("rx_airtime_s", "RX airtime")):
+        if data.get(key) is not None and up:
+            rows.append((label, "%.1f %%" % (data[key] * 100 / up)))
+    if data.get("packets_rx") is not None:
+        rows.append(("Packets RX", _thousands(data["packets_rx"])))
+    if data.get("packets_tx") is not None:
+        rows.append(("Packets TX", _thousands(data["packets_tx"])))
+    if room and data.get("posted") is not None:
+        rows.append(("Posts", _thousands(data["posted"])))
+    return rows
+
+
+def neighbour_rows(rows, nodes):
+    """Neighbour list entries with names where we know the node (from its advert)."""
+    out = []
+    for r in rows:
+        name = None
+        for pk, n in nodes.items():
+            if pk.startswith(r["prefix"]):
+                name = display(n.get("name"))
+                break
+        out.append({"name": name or r["prefix"].upper(), "hex": r["prefix"][:2].upper(),
+                    "detail": "SNR %s \u00b7 %s ago" % (snr_text(r["snr"]), age_text(r["secs_ago"]))})
+    return out
+
+
+_TELEMETRY = {"voltage": ("Voltage", "%.2f V"), "temperature": ("Temperature", "%.1f \u00b0C"),
+              "humidity": ("Humidity", "%.1f %%"), "pressure": ("Pressure", "%.1f hPa"),
+              "illuminance": ("Light", "%d lx"), "current": ("Current", "%.3f A"),
+              "percentage": ("Level", "%d %%"), "power": ("Power", "%d W"),
+              "concentration": ("Concentration", "%d ppm"), "altitude": ("Altitude", "%d m"),
+              "analog_in": ("Analog", "%.2f")}
+
+
+def telemetry_rows(rows):
+    out = []
+    for r in rows:
+        if r["kind"] == "gps":
+            label, value = "Location", "%.4f, %.4f" % (r["value"][0], r["value"][1])
+        else:
+            label, fmt = _TELEMETRY.get(r["kind"], (cap(r["kind"].replace("_", " ")), "%s"))
+            value = fmt % r["value"]
+        if r["channel"] != 1:
+            label = "%s \u00b7 %d" % (label, r["channel"])
+        out.append((label, value.replace("-", "\u2212") if value.startswith("-") else value))
+    return out
+
+
+def cap(s):
+    """First letter upper case (MicroPython's str has no capitalize())."""
+    return s[:1].upper() + s[1:]
+
+
+def _duration(ms):
+    return "%d ms" % ms if ms < 1000 else "%.1f s" % (ms / 1000)
+
+
+def trace_text(result, kind):
+    snrs = result.get("hop_snrs") or []
+    if kind == "ping":
+        there = snr_text(snrs[0]) if snrs else "?"
+        back = snr_text(result["final_snr"]) if result.get("final_snr") is not None else "?"
+        return "Ping %s \u00b7 SNR there %s \u00b7 back %s" % (_duration(result.get("rtt_ms", 0)), there, back)
+    hops = ["%02X %s" % (h & 0xFF, snr_text(snrs[i]) if i < len(snrs) else "?")
+            for i, h in enumerate(result.get("hashes") or [])]
+    if result.get("final_snr") is not None:
+        hops.append("you %s" % snr_text(result["final_snr"]))
+    return "%s \u00b7 %s" % (" \u203a ".join(hops), _duration(result.get("rtt_ms", 0)))
+
+
+def login_line(session):
+    """(text, colour) for the login row."""
+    state = session.get("state")
+    if state == "pending":
+        return ("Logging in\u2026", MUTED)
+    if state == "ok":
+        role = session.get("role") or "guest"
+        return ("%s login" % cap(role.replace("-", " ")), OK if role == "admin" else MUTED)
+    if state == "failed":
+        return (session.get("error") or "Login failed", FAIL_TEXT)
+    return ("Not logged in", MUTED)
