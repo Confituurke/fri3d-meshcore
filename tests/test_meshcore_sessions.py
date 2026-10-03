@@ -201,6 +201,20 @@ def test_status():
     _assert(r["at"] > 0, r)
 
 
+def test_results_carry_mesh_time_when_the_clock_is_unset():
+    env, m, srv, events = _logged_in()          # the login reply says 1790000005
+    mm = sys.modules["meshcore_manager"]
+    real = mm.unix_time
+    mm.unix_time = lambda: 3600                # a device that never synced: early 2000
+    try:
+        m.request_server(srv.hex, "status")
+        srv.answer_request(lambda t, p: STATUS)
+        at = m.server_session(srv.hex)["results"]["status"]["at"]
+        _assert(at >= 1790000005, at)
+    finally:
+        mm.unix_time = real
+
+
 def test_room_status_uses_the_room_layout():
     env, m, srv, events = _logged_in(ROOM)
     m.request_server(srv.hex, "status")

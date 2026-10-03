@@ -2153,7 +2153,7 @@ class MeshCoreManager:
             data = meshcore_server.parse_lpp(body)
         else:
             data = meshcore_server.parse_owner_info(body)
-        s["results"][kind] = {"data": data, "at": unix_time()}
+        s["results"][kind] = {"data": data, "at": self._timestamp()}   # mesh time if no clock
         s["pending"] = None
         s["error"] = None
         self._notify("server", pubkey_hex)
@@ -2173,7 +2173,7 @@ class MeshCoreManager:
             if len(r["hop_snrs"]) < len(r["hashes"]):
                 return True              # still on its way: a repeater passing it on
             r["rtt_ms"] = tdiff(self._now_ms(), t["t0"])
-            s["results"][t["kind"]] = {"data": r, "at": unix_time()}
+            s["results"][t["kind"]] = {"data": r, "at": self._timestamp()}
             s["trace"] = None
             self._notify("server", pubkey_hex)
             return True
