@@ -48,6 +48,13 @@ def test_presets_are_the_official_list():
     _assert(p.DEFAULT_PRESET == "eu-narrow")
 
 
+def test_short_names_for_the_header_pill():
+    p = _presets()
+    _assert(p.by_id("eu-narrow")["short"] == "EU Narrow")
+    _assert(all(len(x["short"]) <= 12 for x in p.PRESETS), [x["short"] for x in p.PRESETS])
+    _assert(p.short_name({"id": "custom", "freq": 868.1, "bw": 125, "sf": 9, "cr": 5}) == "868.100")
+
+
 def test_preamble_rule():
     p = _presets()
     _assert(p.preamble_for(8) == 32)

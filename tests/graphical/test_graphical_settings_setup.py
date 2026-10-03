@@ -81,13 +81,48 @@ class TestSettings(unittest.TestCase):
         wait_for_render(5)
 
     def test_settings_add_hashtag_channel(self):
-        act = mc_fixtures.open_app(tab=3)
-        tab = act._tab
-        tab._channel_name.set_text("#test")
+        mc_fixtures.open_app(tab=3)
+        self.assertTrue(click_label("Add channel"))
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "AddChannelActivity")
+        page._channel_name.set_text("#test")
+        self.assertTrue(click_label("Add channel"))
+        wait_for_render(20)
+        self.assertIn("#test", self.m.get_channel_names())
+        self.assertEqual(mc_fixtures.stack_names()[-1], "MeshCoreHome")
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "#test"))
+
+    def test_settings_add_channel_error_keeps_the_page(self):
+        mc_fixtures.open_app(tab=3)
+        self.assertTrue(click_label("Add channel"))
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        page._channel_name.set_text("Club")
+        page._channel_psk.set_text("not a key!")
         self.assertTrue(click_label("Add channel"))
         wait_for_render(10)
-        self.assertIn("#test", self.m.get_channel_names())
-        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "#test"))
+        self.assertEqual(mc_fixtures.stack_names()[-1], "AddChannelActivity")
+        self.assertNotEqual(page._channel_msg.get_text(), "")
+
+    def test_settings_edit_name_on_its_own_page(self):
+        mc_fixtures.open_app(tab=3)
+        self.assertTrue(click_label("Name"))
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "NameActivity")
+        page._name.set_text("Indy two")
+        self.assertTrue(click_label("Save"))
+        wait_for_render(20)
+        self.assertEqual(self.m.nickname(), "Indy two")
+        self.assertEqual(mc_fixtures.stack_names()[-1], "MeshCoreHome")
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Indy two"))
+
+    def test_settings_channel_row_opens_channel_info(self):
+        mc_fixtures.open_app(tab=3)
+        self.assertTrue(click_label("Public"))
+        wait_for_render(20)
+        self.assertEqual(mc_fixtures.stack_names()[-1], "ChannelInfoActivity")
 
     def test_settings_service_switch(self):
         act = mc_fixtures.open_app(tab=3)

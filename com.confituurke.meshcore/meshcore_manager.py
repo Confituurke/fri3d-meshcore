@@ -1338,6 +1338,7 @@ class MeshCoreManager:
         node["seq"] = self._seq
         node["hops"] = hops
         node["route"] = "flood" if hops else "direct"
+        node["path"] = bytes(pkt.path).hex() if hops else ""
         node["heard_ms"] = self._now_ms()
         self._nodes[adv["pubkey"]] = node
         # cap learned nodes (RAM): evict the least-recently-heard one
@@ -1593,7 +1594,7 @@ class MeshCoreManager:
             return False
         self._learn_path(dec)
         if dec.get("ack_hash"):
-            self._mark_delivered(dec["ack_hash"])
+            self._mark_delivered(dec["ack_hash"], pkt.snr)
         if pkt.is_route_flood():
             self._send_path_return(dec, pkt)
         return True
@@ -1640,6 +1641,16 @@ class MeshCoreManager:
               % (contact.get("name") or pub_hex[:2], hops, "" if hops == 1 else "s"))
         self._save_contacts()
 
+    def reset_route(self, pubkey_hex):
+        """Forget the learned direct route to a contact (the next message floods and the
+        contact teaches us a fresh route). Returns False when there was none."""
+        contact = self._contacts.get(pubkey_hex)
+        if contact is None or not contact.get("path"):
+            return False
+        self._reset_path(pubkey_hex)
+        self._notify("contacts", None)
+        return True
+
     def _reset_path(self, pubkey_hex):
         """The direct route stopped working -- forget it and flood again (resetPathTo)."""
         contact = self._contacts.get(pubkey_hex)
@@ -1664,7 +1675,7 @@ class MeshCoreManager:
         ack = meshcore_dm.decode_ack(pkt.payload)
         if ack is None:
             return False
-        return self._mark_delivered(ack)
+        return self._mark_delivered(ack, pkt.snr)
 
     def _note_echo(self, h):
         """We heard one of our own channel packets come back: a repeater re-flooded it. That
@@ -1738,7 +1749,7 @@ class MeshCoreManager:
         while len(self._pending_order) > 32:
             self._pending_acks.pop(self._pending_order.pop(0), None)
 
-    def _mark_delivered(self, ack4):
+    def _mark_delivered(self, ack4, snr=None):
         key = ack4.hex() if hasattr(ack4, "hex") else ack4
         entry = self._pending_acks.pop(key, None)
         if not entry:
@@ -1749,6 +1760,8 @@ class MeshCoreManager:
             pass
         pub_hex, msg = entry
         msg["delivered"] = True
+        msg["ack_ts"] = self._timestamp()
+        msg["ack_snr"] = snr
         self._cancel_retry(msg)      # acked (possibly for an earlier attempt) -> stop resending
         print("MeshCore: DM delivered (ack %s)" % key)
         self._save_history(pub_hex)

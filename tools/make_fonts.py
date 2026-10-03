@@ -1,10 +1,10 @@
 """Build the app's bundled fonts: Archivo Narrow Regular/SemiBold and IBM Plex Mono Regular,
 subset to Latin-1 plus the few symbols the UI prints. Needs fontTools.
 
-    python3 tools/make_fonts.py ARCHIVO_NARROW_VARIABLE.ttf IBM_PLEX_MONO_REGULAR.ttf
+    python3 tools/make_fonts.py ARCHIVO_NARROW_VARIABLE.ttf IBM_PLEX_MONO_REGULAR.ttf IBM_PLEX_MONO_MEDIUM.ttf
 
 Sources (SIL Open Font License 1.1): google/fonts ofl/archivonarrow/ArchivoNarrow[wght].ttf
-and ofl/ibmplexmono/IBMPlexMono-Regular.ttf. "Plex" is a Reserved Font Name, so the subset
+and ofl/ibmplexmono/IBMPlexMono-{Regular,Medium}.ttf. "Plex" is a Reserved Font Name, so the subset
 of IBM Plex Mono is renamed "Mesh Mono" (the OFL forbids a modified version keeping it).
 The delivery icons (tick, cross, arrow, hourglass) come from LVGL's built-in symbol font.
 """
@@ -17,7 +17,7 @@ from fontTools.varLib import instancer
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                    "com.confituurke.meshcore", "fonts")
-EXTRA = "·→×…−›°€‘’“”–—•"
+EXTRA = "·→×…−›°€‘’“”–—•≈"
 UNICODES = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + [ord(c) for c in EXTRA]
 
 
@@ -52,13 +52,15 @@ def _rename(font, old_names, new_name):
 
 
 def main():
-    archivo, plex = sys.argv[1], sys.argv[2]
-    for weight, name in ((400, "ArchivoNarrow-Regular.ttf"), (600, "ArchivoNarrow-SemiBold.ttf")):
+    archivo, plex, plex_medium = sys.argv[1], sys.argv[2], sys.argv[3]
+    for weight, name in ((400, "ArchivoNarrow-Regular.ttf"), (600, "ArchivoNarrow-SemiBold.ttf"),
+                         (700, "ArchivoNarrow-Bold.ttf")):
         font = instancer.instantiateVariableFont(TTFont(archivo), {"wght": weight})
         _subset(font, os.path.join(OUT, name))
-    mono = TTFont(plex)
-    _rename(mono, ("IBM Plex Mono", "IBMPlexMono", "Plex"), "Mesh Mono")
-    _subset(mono, os.path.join(OUT, "MeshMono-Regular.ttf"))
+    for src, name in ((plex, "MeshMono-Regular.ttf"), (plex_medium, "MeshMono-Medium.ttf")):
+        mono = TTFont(src)
+        _rename(mono, ("IBM Plex Mono", "IBMPlexMono", "Plex"), "Mesh Mono")
+        _subset(mono, os.path.join(OUT, name))
 
 
 if __name__ == "__main__":

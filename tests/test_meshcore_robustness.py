@@ -68,8 +68,8 @@ def test_failed_tx_channel_message_becomes_unheard():
 def test_resend_offered_for_a_message_that_never_went_out():
     fake_mpos.install()
     import ui_model
-    _assert(ui_model.delivery({"incoming": False, "tx": False, "failed": True, "ack": "x"})[0] == "✗")
-    _assert(ui_model.delivery({"incoming": False, "tx": False, "unheard": True})[0] == "?")
+    _assert(ui_model.delivery({"incoming": False, "tx": False, "failed": True, "ack": "x"})["icon"] == "retry")
+    _assert("tap to resend" in ui_model.delivery({"incoming": False, "tx": False, "unheard": True})["text"])
 
 
 # --- the 2**30 ms ticks wrap ---------------------------------------------- #

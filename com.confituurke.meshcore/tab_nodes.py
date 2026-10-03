@@ -11,49 +11,9 @@ import node_activity
 import thread_activity
 from ui_tabs import Tab
 
-ROW_H = 64
 FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"),
            ("new", "New"))
 KIND_TAGS = {"chat": "chat", "rptr": "rptr", "room": "room", "sensor": "sens"}
-
-
-class _Row:
-
-    def __init__(self, parent, on_open):
-        self.pubkey = None
-        self.kind = None
-        self.obj = T.box(parent, T.W, ROW_H, lv.FLEX_FLOW.ROW, "row")
-        self.obj.set_style_pad_left(T.EDGE, lv.PART.MAIN)
-        self.obj.set_style_pad_right(16, lv.PART.MAIN)
-        self.obj.set_style_pad_column(12, lv.PART.MAIN)
-        self.obj.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        T.clickable(self.obj, lambda: on_open(self.pubkey, self.kind))
-        badge = T.box(self.obj, 48, 44, lv.FLEX_FLOW.COLUMN)
-        badge.set_style_bg_color(T.color(T.SURFACE2), lv.PART.MAIN)
-        badge.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
-        badge.set_style_radius(8, lv.PART.MAIN)
-        badge.set_flex_align(lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        self.hex = T.label(badge, "", "mono", T.TEXT)
-        self.tag = T.label(badge, "", "small", T.MUTED)
-        mid = T.box(self.obj, 1, lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN)
-        mid.set_flex_grow(1)
-        top = T.box(mid, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-        top.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        self.name = T.label(top, "", "strong", T.TEXT, lv.label.LONG_MODE.DOTS)
-        self.name.set_width(260)
-        self.age = T.label(top, "", "small", T.MUTED)
-        self.meta = T.label(mid, "", "small", T.MUTED, lv.label.LONG_MODE.DOTS)
-        self.meta.set_width(lv.pct(100))
-
-    def update(self, r):
-        self.pubkey = r["pubkey"]
-        self.kind = r["kind"]
-        self.hex.set_text(r["hex"])
-        self.tag.set_text(KIND_TAGS.get(r["kind"], r["kind"]))
-        self.name.set_text(r["name"])
-        self.age.set_text(r["age"])
-        self.age.set_style_text_color(T.color(r["age_color"]), lv.PART.MAIN)
-        self.meta.set_text(r["meta"])
 
 
 class NodesTab(Tab):
@@ -63,27 +23,35 @@ class NodesTab(Tab):
         self.activity = activity
         self.mgr = activity.mgr
         self.filt = "all"
-        self._rows = {}
-        self._order = []
-        self.header = T.Header(parent, "Nodes", action=("Advert", self.advert))
-        bar = T.box(parent, T.W, 52, lv.FLEX_FLOW.ROW)
-        bar.set_style_pad_left(T.EDGE, lv.PART.MAIN)
-        bar.set_style_pad_right(T.EDGE, lv.PART.MAIN)
-        bar.set_style_pad_column(8, lv.PART.MAIN)
-        bar.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        bar.add_flag(lv.obj.FLAG.SCROLLABLE)
-        bar.set_scroll_dir(lv.DIR.HOR)
-        self._chips = {}
+        self.query = ""
+        self._rows = {}          # pubkey -> T.ListRow
+        self._order = []         # pubkeys in display order (MicroPython dicts are unordered)
+        self._kb = None
+        self._timer = None
+        header = T.HeaderTop(parent, "Nodes", pad_right=8, gap=4)
+        self.search_button = T.icon_button(header.obj, "search", self.open_search)
+        T.advert_button(header.obj, self.advert)
+        self.chips_bar = T.chip_bar(parent, 6)
+        self._chips = {"contacts": T.Chip(self.chips_bar, "", lambda: self.set_filter("contacts"),
+                                          False, 14, 12, "star")}
         for key, text in FILTERS:
-            self._chips[key] = T.Chip(bar, text, lambda k=key: self.set_filter(k), key == "all")
-        self.empty = T.label(parent, "No nodes heard yet. Send an advert to say hello.",
-                             "body", T.MUTED, lv.label.LONG_MODE.WRAP)
-        self.empty.set_width(T.W - 2 * T.EDGE)
-        self.empty.set_style_pad_all(T.EDGE, lv.PART.MAIN)
-        self.list = T.box(parent, T.W, 1, lv.FLEX_FLOW.COLUMN)
-        self.list.set_flex_grow(1)
-        self.list.add_flag(lv.obj.FLAG.SCROLLABLE)
-        self.list.set_scroll_dir(lv.DIR.VER)
+            self._chips[key] = T.Chip(self.chips_bar, text, lambda k=key: self.set_filter(k),
+                                      key == "all", 14, 12)
+        self.search_bar = T.row(parent, T.W, 44, 8)
+        self.search_bar.set_style_pad_left(12, lv.PART.MAIN)
+        self.search_bar.set_style_pad_right(4, lv.PART.MAIN)
+        self.search = T.text_input(self.search_bar, "", "Name or hex id", 1)
+        self.search.set_flex_grow(1)
+        self.search.add_event_cb(lambda e: self._on_query(), lv.EVENT.VALUE_CHANGED, None)
+        T.icon_button(self.search_bar, "close", self.close_search, 44, 44)
+        self.search_bar.add_flag(lv.obj.FLAG.HIDDEN)
+        self.status = T.label(parent, "", 15, col=T.MUTED)
+        self.status.set_style_pad_hor(16, lv.PART.MAIN)
+        self.status.add_flag(lv.obj.FLAG.HIDDEN)
+        self.empty = T.label(parent, "", 16, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                             width=T.W - 32)
+        self.empty.set_style_pad_all(16, lv.PART.MAIN)
+        self.list = T.scroll_area(parent)
         self._timer = lv.timer_create(lambda t: self.refresh(), 30000, None)
         self.refresh()
 
@@ -91,10 +59,44 @@ class NodesTab(Tab):
         if self._timer is not None:
             self._timer.delete()
             self._timer = None
+        self._drop_keyboard()
 
+    # --- search ------------------------------------------------------------ #
+    def open_search(self):
+        self.chips_bar.add_flag(lv.obj.FLAG.HIDDEN)
+        self.search_bar.remove_flag(lv.obj.FLAG.HIDDEN)
+        if self._kb is None:
+            # The keyboard floats over the bottom of the screen, tab bar included.
+            self._kb = T.keyboard(self.list.get_screen(), self.search, floating=True)
+        self.search.add_state(lv.STATE.FOCUSED)
+        self._kb.show_keyboard()
+
+    def close_search(self):
+        self._drop_keyboard()
+        self.search.set_text("")
+        self.search.remove_state(lv.STATE.FOCUSED)
+        self.search_bar.add_flag(lv.obj.FLAG.HIDDEN)
+        self.chips_bar.remove_flag(lv.obj.FLAG.HIDDEN)
+        self._on_query()
+
+    def _drop_keyboard(self):
+        # The keyboard lives on the screen, not in the tab's container: delete it here.
+        if self._kb is not None:
+            self._kb.delete()
+            self._kb = None
+
+    def _on_query(self):
+        q = self.search.get_text()
+        if q != self.query:
+            self.query = q
+            self.refresh()
+
+    # --- behaviour --------------------------------------------------------- #
     def advert(self):
         ok, err = self.mgr.advertise(flood=False)
-        self.header.set_subtitle("Zero-hop advert sent" if ok else (err or "Advert failed"))
+        self.status.set_text("Zero-hop advert sent" if ok else (err or "Advert failed"))
+        self.status.set_style_text_color(T.color(T.MUTED if ok else T.FAIL_TEXT), lv.PART.MAIN)
+        self.status.remove_flag(lv.obj.FLAG.HIDDEN)
 
     def set_filter(self, key):
         self.filt = key
@@ -106,7 +108,7 @@ class NodesTab(Tab):
         nodes = self.mgr.get_learned_companions()
         now = self.mgr._now_ms()
         contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
-        model = ui_model.node_rows(nodes, now, self.filt, contacts)
+        model = ui_model.node_rows(nodes, now, self.filt, contacts, self.query)
         n_all = len(nodes)
         n_new = len(ui_model.node_rows(nodes, now, "new", contacts))
         self._chips["all"].set_text("All %d" % n_all if n_all else "All")
@@ -119,8 +121,12 @@ class NodesTab(Tab):
         for i, r in enumerate(model):
             row = self._rows.get(r["pubkey"])
             if row is None:
-                row = _Row(self.list, self.open_node)
-            row.update(r)
+                row = T.ListRow(self.list, lambda pk=r["pubkey"], kind=r["kind"]: self.open_node(pk, kind))
+            row.set_avatar("node", r["hex"] + "\n" + KIND_TAGS.get(r["kind"], r["kind"]))
+            row.title.set_text(r["name"])
+            row.right.set_text(r["age"])
+            row.right.set_style_text_color(T.color(r["age_color"]), lv.PART.MAIN)
+            row.line2.set_text(r["meta"])
             if row.obj.get_index() != i:
                 row.obj.move_to_index(i)
             rows[r["pubkey"]] = row
@@ -129,7 +135,17 @@ class NodesTab(Tab):
         if rows:
             self.empty.add_flag(lv.obj.FLAG.HIDDEN)
         else:
+            self.empty.set_text(self._empty_text(n_all))
             self.empty.remove_flag(lv.obj.FLAG.HIDDEN)
+
+    def _empty_text(self, n_all):
+        if not n_all:
+            return "No nodes heard yet. Send an advert to say hello."
+        if self.query:
+            return "No node matches \"%s\"." % self.query
+        if self.filt == "contacts":
+            return "No saved contacts yet. Tap a companion to chat; it is saved as a contact."
+        return "Nothing here yet."
 
     def open_node(self, pubkey, kind):
         if kind == "chat":

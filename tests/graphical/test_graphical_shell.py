@@ -39,13 +39,13 @@ class TestShell(unittest.TestCase):
                                   "incoming": True})
         m._bump_unread("Public")
         act = mc_fixtures.open_app()
-        self.assertEqual(act._tab._rows["Public"].badge_label.get_text(), "1")
+        self.assertEqual(act._tab._rows["Public"].badge.label.get_text(), "1")
         act._tab.open_chat("Public", "channel")
         wait_for_render(20)
         mpos.ui.screen_stack[-1][0].finish()
         wait_for_render(20)
-        self.assertTrue(act._tab._rows["Public"].badge.has_flag(lv.obj.FLAG.HIDDEN))
-        self.assertTrue(act.tabbar._badges[0].has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue(act._tab._rows["Public"].badge.obj.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertEqual(act.tabbar._labels[0].get_text(), "Chats")
 
     def test_settings_visits_do_not_leak_keyboards(self):
         mc_fixtures.fresh_manager()

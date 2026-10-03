@@ -12,6 +12,10 @@ from ui_tabs import Tab
 
 REFRESH_MS = 5000
 CHART_POINTS = 180
+CHART_W = 424
+CHART_H = 56
+BASELINE_Y = 44          # dashed reference line, from the top of the chart
+NOISE_RANGE = (-125, -60)
 
 
 class RadioTab(Tab):
@@ -20,74 +24,89 @@ class RadioTab(Tab):
     def build(self, parent, activity):
         self.activity = activity
         self.mgr = activity.mgr
-        self.header = T.Header(parent, "Radio", "")
-        body = T.box(parent, T.W, 1, lv.FLEX_FLOW.COLUMN)
-        body.set_flex_grow(1)
-        body.add_flag(lv.obj.FLAG.SCROLLABLE)
-        body.set_scroll_dir(lv.DIR.VER)
-        body.set_style_pad_hor(T.EDGE, lv.PART.MAIN)
-        body.set_style_pad_bottom(16, lv.PART.MAIN)
-        body.set_style_pad_row(12, lv.PART.MAIN)
+        self._note_until = 0
+        self._timer = None
+        header = T.HeaderTop(parent, "Radio", pad_right=16)
+        self.status = T.label(header.obj, "", 15, col=T.MUTED)
+        body = T.scroll_area(parent, 14, 10)
+        body.set_style_pad_bottom(10, lv.PART.MAIN)
 
-        card = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN, "surface")
-        card.set_style_pad_all(14, lv.PART.MAIN)
-        top = T.box(card, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-        top.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.END, lv.FLEX_ALIGN.END)
-        top.set_style_pad_column(10, lv.PART.MAIN)
-        self.noise = T.label(top, "—", "big", T.TEXT)
-        T.label(top, "dBm noise floor", "small", T.MUTED).set_style_pad_bottom(8, lv.PART.MAIN)
-        self.chart = lv.chart(card)
-        self.chart.set_size(lv.pct(100), 70)
-        self.chart.set_type(lv.chart.TYPE.LINE)
-        self.chart.set_point_count(CHART_POINTS)
-        self.chart.set_div_line_count(0, 0)
-        self.chart.set_axis_range(lv.chart.AXIS.PRIMARY_Y, -125, -60)
-        self.chart.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
-        self.chart.set_style_border_width(0, lv.PART.MAIN)
-        self.chart.set_style_size(0, 0, lv.PART.INDICATOR)
-        self.chart.set_style_line_width(2, lv.PART.ITEMS)
-        self.series = self.chart.add_series(T.color(T.ACCENT), lv.chart.AXIS.PRIMARY_Y)
-        T.label(card, "last 30 min", "small", T.MUTED)
+        card = T.card(body, filled=True, pad_ver=12, pad_hor=14, gap=6)
+        hero = T.row(card, lv.pct(100), lv.SIZE_CONTENT, 10, lv.FLEX_ALIGN.END)
+        self.noise = T.label(hero, "—", 30, 500, mono=True)
+        unit = T.label(hero, "dBm noise floor", 16, col=T.MUTED)
+        unit.set_flex_grow(1)
+        unit.set_style_pad_bottom(5, lv.PART.MAIN)
+        T.label(hero, "last 30 min", 14, col=T.MUTED).set_style_pad_bottom(6, lv.PART.MAIN)
+        self._build_chart(card)
+        stats = T.row(card, lv.pct(100), 21, 0)
+        self._stats = []
+        for _ in range(3):
+            cell = T.row(stats, 141, 21, 4)
+            name = T.label(cell, "", 15, col=T.MUTED)
+            value = T.label(cell, "", 15, mono=True)
+            self._stats.append((name, value))
 
-        chips = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-        chips.set_style_pad_column(8, lv.PART.MAIN)
-        self.peak = T.Chip(chips, "", lambda: None)
-        self.packets = T.Chip(chips, "", lambda: None)
-        self.tx_air = T.Chip(chips, "", lambda: None)
+        buttons = T.row(body, lv.pct(100), 56, 10)
+        zero = T.button(buttons, "Zero-hop advert", lambda: self.advert(False), "outline", 56,
+                        "neighbours only", 1, 17)
+        flood = T.button(buttons, "Flood advert", lambda: self.advert(True), "primary", 56,
+                         "whole mesh", 1, 17)
+        for b in (zero, flood):
+            b.set_flex_grow(1)
 
-        self._advert_button(body, "Zero-hop advert", "neighbours only", False)
-        self._advert_button(body, "Flood advert", "whole mesh", True)
-
-        preset = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN, "surface")
-        preset.set_style_pad_all(14, lv.PART.MAIN)
-        preset.set_style_pad_row(4, lv.PART.MAIN)
+        preset = T.row(body, lv.pct(100), lv.SIZE_CONTENT, 10)
+        T.outline(preset, T.OUTLINE, 12)
+        preset.set_style_pad_ver(10, lv.PART.MAIN)
+        preset.set_style_pad_left(14, lv.PART.MAIN)
+        preset.set_style_pad_right(6, lv.PART.MAIN)
         title, detail, air = ui_model.preset_summary(self.mgr.radio_preset(), DEFAULT_POWER)
-        row = T.box(preset, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-        row.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        T.label(row, title, "strong", T.TEXT)
-        T.Chip(row, "Change", self.change_preset)
-        T.label(preset, detail, "mono", T.MUTED, lv.label.LONG_MODE.WRAP).set_width(lv.pct(100))
-        T.label(preset, air, "small", T.MUTED)
+        text = T.column(preset, 1, lv.SIZE_CONTENT, 2)
+        text.set_flex_grow(1)
+        T.label(text, title, 18, 600)
+        T.label(text, detail, 12, mono=True, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                width=lv.pct(100))
+        T.label(text, air, 14, col=T.MUTED)
+        T.button(preset, "Change", self.change_preset, "filled", 44, size=16)
 
         self._timer = lv.timer_create(lambda t: self.refresh(), REFRESH_MS, None)
         self.refresh()
 
-    def _advert_button(self, parent, title, hint, flood):
-        b = T.box(parent, lv.pct(100), 52, lv.FLEX_FLOW.ROW, "surface")
-        b.set_style_pad_hor(14, lv.PART.MAIN)
-        b.set_style_pad_column(10, lv.PART.MAIN)
-        b.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        T.symbol(b, lv.SYMBOL.WIFI, T.ACCENT)
-        T.label(b, title, "strong", T.TEXT)
-        T.label(b, hint, "small", T.MUTED)
-        T.clickable(b, lambda: self.advert(flood))
+    def _build_chart(self, parent):
+        holder = T.box(parent, CHART_W, CHART_H)
+        self._dash_points = [{"x": 0, "y": BASELINE_Y}, {"x": CHART_W, "y": BASELINE_Y}]
+        base = lv.line(holder)
+        base.set_points(self._dash_points, 2)
+        base.set_style_line_color(T.color(T.OUTLINE), lv.PART.MAIN)
+        base.set_style_line_width(1, lv.PART.MAIN)
+        base.set_style_line_dash_width(3, lv.PART.MAIN)
+        base.set_style_line_dash_gap(4, lv.PART.MAIN)
+        self.chart = lv.chart(holder)
+        self.chart.set_size(CHART_W, CHART_H)
+        self.chart.set_type(lv.chart.TYPE.LINE)
+        self.chart.set_point_count(CHART_POINTS)
+        self.chart.set_div_line_count(0, 0)
+        self.chart.set_axis_range(lv.chart.AXIS.PRIMARY_Y, NOISE_RANGE[0], NOISE_RANGE[1])
+        self.chart.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+        self.chart.set_style_border_width(0, lv.PART.MAIN)
+        self.chart.set_style_pad_all(0, lv.PART.MAIN)
+        self.chart.set_style_size(0, 0, lv.PART.INDICATOR)
+        self.chart.set_style_line_width(2, lv.PART.ITEMS)
+        self.chart.set_style_line_rounded(True, lv.PART.ITEMS)
+        self.series = self.chart.add_series(T.color(T.ACCENT), lv.chart.AXIS.PRIMARY_Y)
 
     def advert(self, flood):
         ok, err = self.mgr.advertise(flood=flood)
         if ok:
-            self.header.set_subtitle("Flood advert sent" if flood else "Zero-hop advert sent")
+            self._note("Flood advert sent" if flood else "Zero-hop advert sent", T.MUTED)
         else:
-            self.header.set_subtitle(err or "Advert failed")
+            self._note(err or "Advert failed", T.FAIL_TEXT)
+
+    def _note(self, text, col):
+        """Show a result in the header until the next-but-one refresh."""
+        self.status.set_text(text)
+        self.status.set_style_text_color(T.color(col), lv.PART.MAIN)
+        self._note_until = 2
 
     def change_preset(self):
         intent = Intent(activity_class=setup_activity.SetupActivity)
@@ -97,11 +116,15 @@ class RadioTab(Tab):
     def refresh(self):
         st = self.mgr.radio_stats()
         t = ui_model.radio_texts(st)
-        self.header.set_subtitle(t["subtitle"])
+        if self._note_until:
+            self._note_until -= 1
+        else:
+            self.status.set_text(t["subtitle"])
+            self.status.set_style_text_color(T.color(T.MUTED), lv.PART.MAIN)
         self.noise.set_text(t["noise"])
-        self.peak.set_text(t["peak"])
-        self.packets.set_text(t["packets"])
-        self.tx_air.set_text(t["tx_air"])
+        for (name, value), (n, v) in zip(self._stats, t["stats"]):
+            name.set_text(n)
+            value.set_text(v)
         series = st.get("noise_series") or []
         self.chart.set_all_values(self.series, lv.CHART_POINT_NONE)
         for v in series[-CHART_POINTS:]:

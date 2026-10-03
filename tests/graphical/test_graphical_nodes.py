@@ -40,7 +40,29 @@ class TestNodes(unittest.TestCase):
         act = mpos.ui.screen_stack[-1][0]
         self.assertEqual(type(act).__name__, "NodeDetailActivity")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "repeater · F1A7…9C2E"))
-        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "2 hops · SNR −3.5 dB · heard 14 min ago"))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), " · SNR −3.5 dB · heard 14 min ago"))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Last SNR"))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "−3.5 dB"))
+
+    def test_star_chip_shows_saved_contacts(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab=1)
+        act._tab._chips["contacts"].obj.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(act._tab._order, [mc_fixtures.BOB])
+
+    def test_search_filters_by_name_and_closes(self):
+        act = mc_fixtures.open_app(tab=1)
+        tab = act._tab
+        tab.search_button.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        tab.search.set_text("aalst")
+        wait_for_render(10)
+        self.assertEqual(len(tab._order), 1)
+        tab.close_search()
+        wait_for_render(10)
+        self.assertEqual(len(tab._order), 4)
+        self.assertTrue(tab.search_bar.has_flag(lv.obj.FLAG.HIDDEN))
 
     def test_advert_button_zero_hop(self):
         rec = mc_fixtures.Recorder(self.m, "advertise", result=(True, None))

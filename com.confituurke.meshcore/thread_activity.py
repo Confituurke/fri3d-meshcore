@@ -1,12 +1,12 @@
-"""Conversation screens: a channel thread and a direct-message thread.
+"""Conversation screens: a channel thread, a direct-message thread, and channel info.
 
-Header, the last MAX_BUBBLES messages as bubbles, a row of quick replies, and the
-composer with a byte counter. The on-screen keyboard takes the bottom of the screen while
+A thread is a header, the messages as bubbles (newest at the bottom), a bar of quick
+replies and the composer. The on-screen keyboard takes the bottom of the screen while
 typing; the quick replies step aside for it."""
 
 import lvgl as lv
 
-from mpos import Activity, MposKeyboard
+from mpos import Activity
 
 import ui_model
 import ui_theme as T
@@ -14,67 +14,83 @@ from meshcore_manager import MeshCoreManager
 
 MAX_BUBBLES = 50
 FIRST_BUBBLES = 25          # shown on opening; "Show earlier messages" loads up to MAX_BUBBLES
-BUBBLE_MAX_W = 340
-KEYBOARD_H = 188
+BUBBLE_MAX_W = 360
 
 
 class _Bubble:
-    """One message: incoming on the left (surface), ours on the right (blue), with its
-    delivery line. Kept so that state changes update it in place."""
+    """One message. Incoming: sender line (channels), surface bubble with its top-left
+    corner squared, meta line. Ours: blue bubble on the right with its top-right corner
+    squared and a status line (time · heard ×N with dots, delivered ✓, or failed ↻)."""
 
-    def __init__(self, parent, msg, show_sender, tz_s, on_resend):
+    def __init__(self, parent, msg, show_sender, tz_s, on_resend, pad_ver):
         self.msg = msg
         own = not msg.get("incoming")
-        self.obj = T.box(parent, T.W, lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-        self.obj.set_style_pad_hor(16, lv.PART.MAIN)
-        self.obj.set_style_pad_ver(4, lv.PART.MAIN)
-        self.obj.set_flex_align(lv.FLEX_ALIGN.END if own else lv.FLEX_ALIGN.START,
-                                lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.START)
-        self.bubble = T.box(self.obj, lv.SIZE_CONTENT, lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN,
-                            "bubble_out" if own else "bubble_in")
-        self.bubble.set_style_max_width(BUBBLE_MAX_W, lv.PART.MAIN)
-        self.bubble.set_style_pad_row(2, lv.PART.MAIN)
+        self.obj = T.row(parent, lv.pct(100), lv.SIZE_CONTENT, 0,
+                         lv.FLEX_ALIGN.END if own else lv.FLEX_ALIGN.START)
+        group = T.column(self.obj, lv.SIZE_CONTENT, lv.SIZE_CONTENT, 3)
+        group.set_style_max_width(BUBBLE_MAX_W, lv.PART.MAIN)
+        group.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.END if own else lv.FLEX_ALIGN.START,
+                             lv.FLEX_ALIGN.START)
         if show_sender and not own:
-            T.label(self.bubble, msg.get("sender") or "?", "strong", T.ACCENT)
-        text = T.label(self.bubble, msg.get("text", ""), "body", T.TEXT, lv.label.LONG_MODE.WRAP)
-        text.set_style_max_width(BUBBLE_MAX_W - 20, lv.PART.MAIN)
-        self.status = None
-        self.glyph = None
+            name = msg.get("sender") or "?"
+            T.label(group, name, 15, 600, ui_model.sender_color(name))
+        self.bubble = T.box(group, lv.SIZE_CONTENT, lv.SIZE_CONTENT)
+        T.fill(self.bubble, T.OWN if own else T.SURFACE, 16)
+        self.bubble.set_style_pad_ver(pad_ver, lv.PART.MAIN)
+        self.bubble.set_style_pad_hor(13, lv.PART.MAIN)
+        self.bubble.set_style_max_width(BUBBLE_MAX_W, lv.PART.MAIN)
+        # The canvas squares one corner (radius 4) next to the sender; LVGL has one radius
+        # per object, so a small rounded square covers that corner.
+        tail = T.box(self.bubble, 16, 16)
+        T.fill(tail, T.OWN if own else T.SURFACE, 4)
+        tail.add_flag(lv.obj.FLAG.IGNORE_LAYOUT)
+        tail.align(lv.ALIGN.TOP_RIGHT if own else lv.ALIGN.TOP_LEFT, 13 if own else -13, -pad_ver)
+        text = T.label(self.bubble, msg.get("text", ""), 18, col=T.OWN_TEXT if own else T.TEXT,
+                       long_mode=lv.label.LONG_MODE.WRAP)
+        text.set_style_max_width(BUBBLE_MAX_W - 26, lv.PART.MAIN)
+        text.set_width(lv.SIZE_CONTENT)
+        text.set_style_text_line_space(4, lv.PART.MAIN)
+        self.meta = T.row(group, lv.SIZE_CONTENT, lv.SIZE_CONTENT, 5)
         if own:
-            row = T.box(self.bubble, lv.SIZE_CONTENT, lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-            row.set_style_pad_column(6, lv.PART.MAIN)
-            row.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-            self.glyph = T.symbol(row, "", T.MUTED)
-            self.status = T.label(row, "", "small", T.MUTED)
-            T.clickable(self.bubble, lambda: on_resend(self.msg))
-        else:
-            meta = ui_model.clock_text(msg.get("ts", 0), tz_s)
-            if msg.get("snr") is not None:
-                meta += " · " + ui_model.signal_report(msg)
-            T.label(self.bubble, meta, "small", T.MUTED)
+            # "tap to resend" sits in the meta line, so it answers taps as well as the bubble.
+            T.clickable(self.bubble, lambda: on_resend(self.msg), feedback=False)
+            T.clickable(self.meta, lambda: on_resend(self.msg), feedback=False)
+        self._tz = tz_s
         self.update()
 
     def update(self):
-        if self.status is None:
+        self.meta.clean()
+        if self.msg.get("incoming"):
+            meta = ui_model.clock_text(self.msg.get("ts", 0), self._tz)
+            if self.msg.get("snr") is not None:
+                meta += " · " + ui_model.signal_report(self.msg)
+            T.label(self.meta, meta, 12, mono=True, col=T.MUTED)
             return
-        glyph, text, col = ui_model.delivery(self.msg)
-        self.glyph.set_text(T.GLYPHS.get(glyph, glyph))
-        self.glyph.set_style_text_color(T.color(col), lv.PART.MAIN)
-        self.status.set_text(text)
-        self.status.set_style_text_color(T.color(col), lv.PART.MAIN)
+        d = ui_model.delivery(self.msg, self._tz)
+        if d["icon"]:
+            T.icon(self.meta, d["icon"], d.get("icon_color", d["color"]))
+        T.label(self.meta, d["text"], 12, mono=True, col=d["color"])
+        if d["dots"]:
+            dots = T.row(self.meta, lv.SIZE_CONTENT, 6, 3)
+            for _ in range(d["dots"]):
+                T.fill(T.box(dots, 6, 6), T.ACCENT, 3)
+        for i in range(self.meta.get_child_count()):
+            self.meta.get_child(i).add_flag(lv.obj.FLAG.EVENT_BUBBLE)
+        failed = ui_model.can_resend(self.msg)
+        self.bubble.set_style_border_width(2 if failed else 0, lv.PART.MAIN)
+        self.bubble.set_style_border_color(T.color(T.FAIL), lv.PART.MAIN)
 
 
 class ThreadActivity(Activity):
     """Shared by both thread kinds; subclasses say where messages come from and go to."""
+    pad_ver = 9          # bubble padding (canvas: 9 in channels, 8 in direct threads)
+    bottom_aligned = False
 
     def key(self):
         raise NotImplementedError
 
-    def title(self):
+    def build_header(self, scr):
         raise NotImplementedError
-
-    def subtitle(self):
-        return ""
 
     def messages(self):
         raise NotImplementedError
@@ -87,6 +103,9 @@ class ThreadActivity(Activity):
 
     def placeholder(self):
         return "Message"
+
+    def show_sender(self):
+        return False
 
     def event_matches(self, event, data):
         raise NotImplementedError
@@ -101,26 +120,18 @@ class ThreadActivity(Activity):
         self._bubbles = {}            # id(msg) -> _Bubble
         self._limit = FIRST_BUBBLES
         self._earlier = None
+        self._divider = None
         scr = T.make_screen()
-        scr.set_flex_flow(lv.FLEX_FLOW.COLUMN)
-        self.header = T.Header(scr, self.title(), self.subtitle(), back=self.finish)
-        self.list = T.box(scr, T.W, 1, lv.FLEX_FLOW.COLUMN)
-        self.list.set_flex_grow(1)
-        self.list.add_flag(lv.obj.FLAG.SCROLLABLE)
-        self.list.set_scroll_dir(lv.DIR.VER)
-        self.list.set_style_pad_ver(8, lv.PART.MAIN)
+        self.build_header(scr)
+        gap = 10 if self.pad_ver == 9 else 8
+        self.list = T.scroll_area(scr, 14, gap)
+        self.list.set_style_pad_ver(gap, lv.PART.MAIN)
+        if self.bottom_aligned:
+            self.list.set_flex_align(lv.FLEX_ALIGN.END, lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.START)
         self._build_quick_replies(scr)
         self._build_composer(scr)
-        self._kb = MposKeyboard(scr)
-        self._kb.set_size(T.W, KEYBOARD_H)
-        self._kb.set_style_bg_color(T.color(T.SURFACE), lv.PART.MAIN)
-        self._kb.set_style_bg_color(T.color(T.SURFACE2), lv.PART.ITEMS)
-        self._kb.set_style_text_color(T.color(T.TEXT), lv.PART.ITEMS)
-        self._kb.add_flag(lv.obj.FLAG.HIDDEN)
-        self._kb.set_textarea(self._ta, on_show=self._on_kb_show, on_hide=self._on_kb_hide)
-        unread = self.mgr.get_unread(self.key())
-        self._new_divider_at = unread       # messages from the end that are new
-        self._divider = None
+        self._kb = T.keyboard(scr, self._ta, self._on_kb_show, self._on_kb_hide)
+        self._new_divider_at = self.mgr.get_unread(self.key())
         self.refresh()
         self.mgr.clear_unread(self.key())
         if __debug__:
@@ -129,42 +140,25 @@ class ThreadActivity(Activity):
         self.setContentView(scr)
 
     def _build_quick_replies(self, scr):
-        self.quick = T.box(scr, T.W, T.CHIP_H + 8, lv.FLEX_FLOW.ROW)
-        self.quick.set_style_pad_left(T.EDGE, lv.PART.MAIN)
-        self.quick.set_style_pad_column(8, lv.PART.MAIN)
-        self.quick.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        self.quick.add_flag(lv.obj.FLAG.SCROLLABLE)
-        self.quick.set_scroll_dir(lv.DIR.HOR)
+        self.quick = T.chip_bar(scr, 8)
         for text in ui_model.QUICK_REPLIES:
-            T.Chip(self.quick, text, lambda t=text: self._quick(t), h=T.CHIP_H - 6)
+            T.quick_chip(self.quick, text, lambda t=text: self._quick(t))
 
     def _build_composer(self, scr):
-        row = T.box(scr, T.W, T.COMPOSER_H, lv.FLEX_FLOW.ROW)
-        row.set_style_pad_hor(12, lv.PART.MAIN)
-        row.set_style_pad_column(8, lv.PART.MAIN)
-        row.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        row.set_style_bg_color(T.color(T.SURFACE), lv.PART.MAIN)
-        row.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
-        self._ta = lv.textarea(row)
-        self._ta.set_one_line(True)
-        self._ta.set_placeholder_text(self.placeholder())
-        self._ta.set_height(40)
+        bar = T.row(scr, T.W, T.COMPOSER_H + 1, 8)
+        T.fill(bar, T.BAR)
+        T.divider(bar, lv.BORDER_SIDE.TOP)
+        bar.set_style_pad_left(12, lv.PART.MAIN)
+        bar.set_style_pad_right(8, lv.PART.MAIN)
+        self._ta = T.text_input(bar, "", self.placeholder(), 1)
         self._ta.set_flex_grow(1)
-        self._ta.set_style_text_font(T.font("body"), lv.PART.MAIN)
-        self._ta.set_style_bg_color(T.color(T.SURFACE2), lv.PART.MAIN)
-        self._ta.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
-        self._ta.set_style_border_width(0, lv.PART.MAIN)
-        self._ta.set_style_radius(20, lv.PART.MAIN)
-        self._ta.set_style_pad_hor(14, lv.PART.MAIN)
         self._ta.add_event_cb(lambda e: self._update_counter(), lv.EVENT.VALUE_CHANGED, None)
-        self._counter = T.label(row, "", "mono", T.MUTED)
-        self._send = T.box(row, 44, 44)
-        self._send.set_style_bg_color(T.color(T.ACCENT), lv.PART.MAIN)
-        self._send.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
+        self._counter = T.label(bar, "", 12, mono=True, col=T.MUTED)
+        self._send = T.box(bar, 44, 44)
+        T.fill(self._send, T.ACCENT, 22)
         self._send.set_style_bg_opa(lv.OPA._40, lv.PART.MAIN | lv.STATE.DISABLED)
-        self._send.set_style_radius(22, lv.PART.MAIN)
-        T.symbol(self._send, lv.SYMBOL.RIGHT, T.BG).center()
-        T.clickable(self._send, self._send_typed)
+        T.icon(self._send, "send", T.BG).center()
+        T.clickable(self._send, self._send_typed, feedback=False)
         self._update_counter()
 
     # --- behaviour ------------------------------------------------------- #
@@ -172,7 +166,11 @@ class ThreadActivity(Activity):
         text = self._ta.get_text()
         left = self.budget(text)
         self._counter.set_text("%d left" % left)
-        self._counter.set_style_text_color(T.color(T.ERR if left < 0 else T.MUTED), lv.PART.MAIN)
+        if text:
+            self._counter.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self._counter.add_flag(lv.obj.FLAG.HIDDEN)
+        self._counter.set_style_text_color(T.color(T.FAIL_TEXT if left < 0 else T.MUTED), lv.PART.MAIN)
         if left < 0 or not text.strip():
             self._send.add_state(lv.STATE.DISABLED)
         else:
@@ -195,6 +193,8 @@ class ThreadActivity(Activity):
             if last is None:
                 return
             text = ui_model.signal_report(last)
+        if self.budget(text) < 0:
+            return
         self.send_text(text)
 
     def _resend(self, msg):
@@ -221,15 +221,24 @@ class ThreadActivity(Activity):
         self.list.clean()
         self.refresh(scroll=False)
 
+    def _new_divider(self):
+        r = T.row(self.list, lv.pct(100), 18, 10)
+        left = T.box(r, 1, 1)
+        left.set_flex_grow(1)
+        T.fill(left, T.ACCENT)
+        T.label(r, "New", 14, 600, T.ACCENT)
+        right = T.box(r, 1, 1)
+        right.set_flex_grow(1)
+        T.fill(right, T.ACCENT)
+        return r
+
     def refresh(self, scroll=True):
         all_msgs = self.messages()
         msgs = all_msgs[-self._limit:]
         if len(all_msgs) > len(msgs) and self._limit < MAX_BUBBLES and self._earlier is None:
-            row = T.box(self.list, T.W, lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-            row.set_flex_align(lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-            row.set_style_pad_ver(6, lv.PART.MAIN)
-            T.Chip(row, "Show earlier messages", self.show_earlier)
-            self._earlier = row
+            r = T.row(self.list, lv.pct(100), lv.SIZE_CONTENT, 0, lv.FLEX_ALIGN.CENTER)
+            T.quick_chip(r, "Show earlier messages", self.show_earlier)
+            self._earlier = r
         live = set(id(m) for m in msgs)
         for k in list(self._bubbles):
             if k not in live:
@@ -238,19 +247,16 @@ class ThreadActivity(Activity):
         for i, m in enumerate(msgs):
             b = self._bubbles.get(id(m))
             if b is None:
-                if self._new_divider_at and i == len(msgs) - self._new_divider_at and self._divider is None:
-                    self._divider = T.label(self.list, "New", "small", T.ACCENT)
-                    self._divider.set_style_pad_left(T.EDGE, lv.PART.MAIN)
-                b = _Bubble(self.list, m, self.show_sender(), self._tz, self._resend)
+                if (self._new_divider_at and i == len(msgs) - self._new_divider_at
+                        and self._divider is None):
+                    self._divider = self._new_divider()
+                b = _Bubble(self.list, m, self.show_sender(), self._tz, self._resend, self.pad_ver)
                 self._bubbles[id(m)] = b
                 added = True
             else:
                 b.update()
         if added and scroll:
             self._scroll_to_end()
-
-    def show_sender(self):
-        return False
 
     def onResume(self, screen):
         super().onResume(screen)
@@ -274,12 +280,20 @@ class ChannelChatActivity(ThreadActivity):
     def key(self):
         return self.getIntent().extras.get("channel")
 
-    def title(self):
-        return self.key()
-
-    def subtitle(self):
+    def build_header(self, scr):
         kind = self.mgr.channel_kind(self.key()) or "public"
-        return {"public": "Public channel", "hashtag": "Hashtag channel"}.get(kind, "Private channel")
+        sub = {"public": "Public channel", "hashtag": "Hashtag channel"}.get(kind, "Private channel")
+        self.header = T.HeaderSub(scr, self.key(), sub, back=self.finish, border=True,
+                                  menu=self.open_info)
+
+    def open_info(self):
+        from mpos import Intent
+        intent = Intent(activity_class=ChannelInfoActivity)
+        intent.putExtra("channel", self.key())
+        self.startActivity(intent)
+
+    def placeholder(self):
+        return "Message %s" % self.key()
 
     def show_sender(self):
         return True
@@ -298,6 +312,8 @@ class ChannelChatActivity(ThreadActivity):
 
 
 class DMChatActivity(ThreadActivity):
+    pad_ver = 8
+    bottom_aligned = True
 
     def key(self):
         return self.getIntent().extras.get("pubkey")
@@ -309,12 +325,21 @@ class DMChatActivity(ThreadActivity):
         c = self._contact()
         return c.get("name") or self.key()[:8]
 
-    def subtitle(self):
+    def route_text(self):
         c = self._contact()
         if not c.get("path"):
-            return "route unknown · flood"
+            return "flood"
         hops = (c.get("path_raw") or 0) & 63
         return "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+
+    def build_header(self, scr):
+        self.header = T.HeaderCompact(scr, self.title(), self.finish, self.route_text(),
+                                      self.forget_route)
+
+    def forget_route(self):
+        """Tapping the route pill drops a stale direct route: the next message floods."""
+        self.mgr.reset_route(self.key())
+        self.header.pill_label.set_text(self.route_text())
 
     def placeholder(self):
         return "Message to %s" % self.title()
@@ -332,4 +357,41 @@ class DMChatActivity(ThreadActivity):
             self.mgr.send_dm(key, text)
 
     def event_matches(self, event, data):
-        return event == "dm" and data[0] == self.key()
+        return (event == "dm" and data[0] == self.key()) or event == "contacts"
+
+    def _on_change(self):
+        self.header.pill_label.set_text(self.route_text())
+        super()._on_change()
+
+
+class ChannelInfoActivity(Activity):
+    """What a channel is and how others join it: its kind, its key to share (hashtag and
+    private channels), and leaving it."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        name = self.getIntent().extras.get("channel")
+        ch = self.mgr.get_channel(name)
+        kind = self.mgr.channel_kind(name) or "public"
+        scr = T.make_screen()
+        T.HeaderSub(scr, name, "Channel info", back=self.finish)
+        body = T.scroll_area(scr, 14, 10)
+        info = T.card(body, filled=False, pad_ver=0, gap=0)
+        T.SettingRow(info, "Kind", kind, first=True)
+        if ch is not None and getattr(ch, "psk_b64", None):
+            T.SettingRow(info, "Key", ch.psk_b64)
+        if kind == "hashtag":
+            hint = "Anyone who joins %s gets the same key from its name." % name
+        elif kind == "private":
+            hint = "Share the key with the people you want in this channel."
+        else:
+            hint = "Public is the channel every MeshCore node listens to."
+        T.label(body, hint, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        if name != "Public":
+            T.button(body, "Leave channel", lambda: self.leave(name), kind="outline",
+                     h=52, width=lv.pct(100))
+        self.setContentView(scr)
+
+    def leave(self, name):
+        self.mgr.remove_channel(name)
+        self.finish()

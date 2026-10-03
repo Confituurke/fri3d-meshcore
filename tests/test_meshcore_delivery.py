@@ -136,6 +136,23 @@ def test_resend_replaces_failed_dm():
     _assert(msgs[0]["text"] == "ping" and msgs[0]["attempt"] == 0 and not msgs[0]["failed"])
 
 
+def test_delivered_dm_records_ack_time_and_snr():
+    import meshcore_manager as mm
+    env, m, _ = _setup()
+    peer_pub, peer_prv, secret = fake_mpos.with_peer(env, m)
+    m.send_dm(peer_pub.hex(), "ping")
+    fake_mpos.drain(m)
+    msg = m.get_dm_messages(peer_pub.hex())[-1]
+    from meshcore_packet import MeshCorePacket, make_header, encode_path_len
+    from meshcore_packet import ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_ACK
+    ack = bytes.fromhex(msg["ack"]) + b"\x00\x01"
+    raw = MeshCorePacket(make_header(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_ACK), encode_path_len(0),
+                         b"", ack).to_bytes()
+    m._ingest(raw, rssi=-80, snr=7.0)
+    _assert(msg["delivered"] is True and msg["ack_snr"] == 7.0, msg)
+    _assert(abs(msg["ack_ts"] - mm.unix_time()) <= 2, msg)
+
+
 def test_resend_refuses_a_pending_message():
     env, m, _ = _setup()
     m.send_group_text("Public", "hello")

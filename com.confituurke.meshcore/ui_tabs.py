@@ -16,5 +16,10 @@ class Tab:
     def on_event(self, event, data):
         """A manager event, already on the LVGL thread."""
 
+    def on_resume(self):
+        """The main screen is back on top: catch up on what changed meanwhile (messages read
+        in a thread, settings changed on a sub-page)."""
+        self.on_event("unread", None)
+
     def destroy(self):
         """Called before the tab's widgets are deleted (stop timers here)."""

@@ -8,18 +8,28 @@ import time
 
 import meshcore_presets
 
-# Colours (0xRRGGBB), shared with ui_theme.
-BG = 0x10151B
-SURFACE = 0x19212A
-SURFACE2 = 0x222C37
-LINE = 0x2C3846
+# Colours (0xRRGGBB) of the design canvas, shared with ui_theme.
+BG = 0x10151B         # app background; text on accent fills
+BAR = 0x0D1217        # tab bar, composer bar
+SURFACE = 0x19212A    # chips, pills, cards, incoming bubbles, inputs
+SURFACE2 = 0x222C37   # pressed state
+LINE = 0x222C37       # dividers
+OUTLINE = 0x2C3846    # outlines, secondary buttons
 TEXT = 0xE9EEF3
 MUTED = 0xA3B0BD
 ACCENT = 0xF4A93B
-OWN = 0x1E4B78
-OK = 0x9BE0A8
-WARN = 0xF2C98A
-ERR = 0xF08A8A
+OWN = 0x1E4B78        # outgoing bubble
+OWN_TEXT = 0xF2F7FC
+CHAN_BG, CHAN_FG = 0x1F3A3F, 0x8FD3DA
+DM_BG, DM_FG = 0x3A2E52, 0xCDB8F5
+ROOM_BG = 0x2B3542
+DELIVERED = 0x6CB4FF  # delivered check
+FAIL = 0xFF9F7A       # failed bubble border
+FAIL_TEXT = 0xFFB89C  # failed meta line
+OK = 0x9BE0A8         # fresh age
+WARN = 0xF2C98A       # older age, unheard
+ERR = FAIL_TEXT
+SENDER_COLORS = (CHAN_FG, DM_FG, 0xF2C98A, 0x9BE0A8, 0x6CB4FF, 0xFFB89C)
 
 MAX_TEXT_LEN = 160          # bytes of text in one MeshCore message (BaseChatMesh.h)
 QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")
@@ -117,25 +127,35 @@ def chat_rows(mgr, now_s, filt="all", tz_s=0):
     return rows
 
 
-def delivery(msg):
-    """(glyph, text, colour) for an outgoing message's status line."""
+def delivery(msg, tz_s=0):
+    """Status line of an outgoing message: {icon (None/"check"/"retry"), icon_color, text,
+    color, dots (repeater echoes shown as dots, at most 6)}."""
+    t = clock_text(msg.get("ts", 0), tz_s)
     if msg.get("failed"):
-        return ("✗", "no ack after 4 tries · tap to resend", ERR)
+        return {"icon": "retry", "text": "no ack after 4 tries · tap to resend",
+                "color": FAIL_TEXT, "dots": 0, "icon_color": FAIL_TEXT}
     if msg.get("unheard") and not msg.get("heard"):
-        return ("?", "not heard by a repeater · tap to resend", WARN)
+        return {"icon": None, "text": "not heard by a repeater · tap to resend",
+                "color": WARN, "dots": 0}
     if not msg.get("tx"):
-        return ("⏳", "sending", MUTED)
-    if "ack" in msg or "delivered" in msg:          # a direct message
-        if msg.get("delivered"):
-            return ("✓", "delivered", OK)
-        if msg.get("failed"):
-            return ("✗", "no ack after 4 tries · tap to resend", ERR)
-        return ("→", "sent", MUTED)
+        return {"icon": None, "text": t + " · sending", "color": MUTED, "dots": 0}
+    if msg.get("delivered"):
+        text = "delivered " + clock_text(msg.get("ack_ts") or msg.get("ts", 0), tz_s)
+        if msg.get("ack_snr") is not None:
+            text += " · SNR " + snr_text(msg["ack_snr"])
+        return {"icon": "check", "text": text, "color": MUTED, "dots": 0, "icon_color": DELIVERED}
     if msg.get("heard"):
-        return ("✓", "heard ×%d" % msg["heard"], OK)
-    if msg.get("unheard"):
-        return ("?", "not heard by a repeater · tap to resend", WARN)
-    return ("→", "sent", MUTED)
+        return {"icon": None, "text": "%s · heard ×%d" % (t, msg["heard"]), "color": MUTED,
+                "dots": min(msg["heard"], 6)}
+    return {"icon": None, "text": t + " · sent", "color": MUTED, "dots": 0}
+
+
+def sender_color(name):
+    """A stable colour per sender name in channel threads."""
+    h = 0
+    for ch in name or "":
+        h = (h * 31 + ord(ch)) & 0xFFFF
+    return SENDER_COLORS[h % len(SENDER_COLORS)]
 
 
 def can_resend(msg):
@@ -175,17 +195,24 @@ def _age_color(seconds):
     return MUTED
 
 
-def node_rows(nodes, now_ms, filt="all", contacts=()):
-    """Rows for the Nodes tab. filt: all, chat, rptr, room, new (heard in the last hour and
-    not a contact). `nodes` come most recent first, as the manager lists them."""
+def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
+    """Rows for the Nodes tab. filt: all, contacts (saved), chat, rptr, room, new (heard in
+    the last hour and not a contact); query matches the name or hex id, any case. `nodes`
+    come most recent first, as the manager lists them."""
     rows = []
+    q = (query or "").strip().lower()
     for n in nodes:
         kind = _KINDS.get(n.get("type"), "other")
         age_s = _ticks_age_s(now_ms, n.get("heard_ms", now_ms))
         if filt == "new":
             if age_s >= 3600 or n.get("pubkey") in contacts:
                 continue
+        elif filt == "contacts":
+            if n.get("pubkey") not in contacts:
+                continue
         elif filt != "all" and kind != filt:
+            continue
+        if q and q not in (n.get("name") or "").lower() and not (n.get("id") or "").lower().startswith(q):
             continue
         hops = n.get("hops") or 0
         meta = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
@@ -200,23 +227,40 @@ def node_rows(nodes, now_ms, filt="all", contacts=()):
 _KIND_WORDS = {"chat": "companion", "rptr": "repeater", "room": "room server", "sensor": "sensor"}
 
 
+def _via(path_hex, hops):
+    """'3af1', 2 hops -> '3A › F1' (each repeater's hash prefix, in order)."""
+    if not path_hex or not hops or len(path_hex) % hops:
+        return ""
+    step = len(path_hex) // hops
+    return " › ".join(path_hex[i:i + step].upper() for i in range(0, len(path_hex), step))
+
+
 def node_detail(n, now_ms):
-    """Header and info lines for a node's detail screen."""
+    """Header, route line (lead, mono path, tail) and key-value fields for a node's
+    detail screen."""
     kind = _KINDS.get(n.get("type"), "other")
     pk = (n.get("pubkey") or "").upper()
     hops = n.get("hops") or 0
-    info = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+    lead = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
+    via = _via(n.get("path"), hops)
+    tail = ""
     if n.get("snr") is not None:
-        info += " · SNR %s dB" % snr_text(n["snr"])
+        tail += " · SNR %s dB" % snr_text(n["snr"])
     age = age_text(_ticks_age_s(now_ms, n.get("heard_ms", now_ms)))
-    info += " · heard now" if age == "now" else " · heard %s ago" % age
-    fields = [("Type", _KIND_WORDS.get(kind, kind)), ("Public key", pk.lower())]
+    tail += " · heard now" if age == "now" else " · heard %s ago" % age
+    fields = [("Type", _KIND_WORDS.get(kind, kind)), ("Hops", str(hops))]
+    if n.get("snr") is not None:
+        fields.append(("Last SNR", snr_text(n["snr"]) + " dB"))
+    if n.get("rssi") is not None:
+        fields.append(("Last RSSI", _minus("%d" % n["rssi"]) + " dBm"))
     if n.get("lat") is not None and n.get("lon") is not None:
-        fields.append(("Location", "%.5f, %.5f" % (n["lat"], n["lon"])))
+        fields.append(("Location", "%.4f, %.4f" % (n["lat"], n["lon"])))
     fields.append(("Signature", "verified" if n.get("verified") else "not checked"))
     return {"title": n.get("name") or pk[:8] or "?",
             "subtitle": "%s · %s…%s" % (_KIND_WORDS.get(kind, kind), pk[:4], pk[-4:]),
-            "info": info, "fields": fields}
+            "info": lead + tail,
+            "route": (lead + " via " if via else lead, via, tail),
+            "fields": fields, "pubkey": pk.lower()}
 
 
 def radio_texts(st):
@@ -232,9 +276,9 @@ def radio_texts(st):
     peak = st.get("peak_rssi_30m")
     return {"subtitle": sub,
             "noise": _minus("%d" % noise) if noise is not None else "—",
-            "peak": "Peak " + (_minus("%d" % peak) if peak is not None else "—"),
-            "packets": "Packets %d/h" % st.get("packets_per_h", 0),
-            "tx_air": "TX air %.1f %%" % st.get("tx_air_pct", 0.0)}
+            "stats": [("Peak", _minus("%d" % peak) if peak is not None else "—"),
+                      ("Packets", "%d/h" % st.get("packets_per_h", 0)),
+                      ("TX air", "%.1f %%" % st.get("tx_air_pct", 0.0))]}
 
 
 def preset_summary(p, power):

@@ -21,9 +21,9 @@ class TestChats(unittest.TestCase):
         rows = act._tab._rows
         self.assertEqual(act._tab._order[0], mc_fixtures.ALEX)   # newest first
         pub = rows["Public"]
-        self.assertEqual(pub.preview.get_text(), "Sam: road closed near Aalst")
-        self.assertEqual(pub.badge_label.get_text(), "2")
-        self.assertEqual(rows[mc_fixtures.ALEX].preview.get_text(), "You: see you at three")
+        self.assertEqual(pub.line2.get_text(), "Sam: road closed near Aalst")
+        self.assertEqual(pub.badge.label.get_text(), "2")
+        self.assertEqual(rows[mc_fixtures.ALEX].line2.get_text(), "You: see you at three")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Unread 1"))
 
     def test_filter_direct_hides_channels(self):
@@ -43,8 +43,8 @@ class TestChats(unittest.TestCase):
         wait_for_render(10)
         row = act._tab._rows["Public"]
         self.assertIs(row.obj, before)
-        self.assertEqual(row.preview.get_text(), "Robin: copy that")
-        self.assertEqual(row.badge_label.get_text(), "3")
+        self.assertEqual(row.line2.get_text(), "Robin: copy that")
+        self.assertEqual(row.badge.label.get_text(), "3")
         self.assertEqual(act._tab._order[0], "Public")
         self.assertEqual(row.obj.get_index(), 0)
 

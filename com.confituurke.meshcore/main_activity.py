@@ -15,11 +15,12 @@ import tab_radio
 import tab_settings
 import thread_activity  # noqa: F401  (notification intents name its classes)
 import setup_activity
+import settings_pages  # noqa: F401
 from meshcore_manager import MeshCoreManager, MESHCORE_APP
 
 
 class MeshCoreHome(Activity):
-    TAB_LABELS = ("Chats", "Nodes", "Radio", "Settings")
+    TABS = (("Chats", "chat"), ("Nodes", "nodes"), ("Radio", "radio"), ("Settings", "settings"))
 
     def tab_classes(self):
         return (tab_chats.ChatsTab, tab_nodes.NodesTab, tab_radio.RadioTab, tab_settings.SettingsTab)
@@ -36,8 +37,9 @@ class MeshCoreHome(Activity):
         if not self.mgr.is_running():
             self.mgr.start()           # listen while the app is open
         scr = T.make_screen()
-        self.content = T.box(scr, T.W, T.H - T.TABBAR_H, lv.FLEX_FLOW.COLUMN)
-        self.tabbar = T.TabBar(scr, self.TAB_LABELS, self.select)
+        self.content = T.column(scr, T.W, 1)
+        self.content.set_flex_grow(1)
+        self.tabbar = T.TabBar(scr, self.TABS, self.select)
         extras = self.getIntent().extras if self.getIntent() else None
         start = (extras or {}).get("tab", 0) if isinstance(extras, dict) else 0
         self.select(start)
@@ -69,15 +71,15 @@ class MeshCoreHome(Activity):
             total += self.mgr.get_unread(name)
         for c in self.mgr.get_contacts():
             total += self.mgr.get_unread(c["pubkey"])
-        self.tabbar.set_badge(0, total)
+        self.tabbar.set_count(0, total)
 
     def onResume(self, screen):
         super().onResume(screen)
         self.mgr.add_subscriber(self._on_event)
-        # Events while a thread was on top (e.g. its messages being read) were not seen here.
+        # Events while another screen was on top were not seen here.
         self.refresh_badge()
         if self._tab is not None:
-            self._tab.on_event("unread", None)
+            self._tab.on_resume()
 
     def onPause(self, screen):
         self.mgr.remove_subscriber(self._on_event)

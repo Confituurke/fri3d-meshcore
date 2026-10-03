@@ -3,7 +3,7 @@ content is swapped per step. Opened with extra step=2 it only changes the radio 
 
 import lvgl as lv
 
-from mpos import Activity, Intent, MposKeyboard, SharedPreferences
+from mpos import Activity, Intent, SharedPreferences
 
 import meshcore_presets
 import ui_theme as T
@@ -14,6 +14,11 @@ FOOTNOTE = ("Everyone you want to reach must use the same frequency, bandwidth, 
 BWS = ("62.5", "125", "250", "500")
 SFS = ("7", "8", "9", "10", "11", "12")
 CRS = ("5", "6", "7", "8")
+
+
+def _bw_text(bw):
+    s = str(bw)
+    return s.rstrip("0").rstrip(".") if "." in s else s
 
 
 class SetupActivity(Activity):
@@ -30,117 +35,105 @@ class SetupActivity(Activity):
         self._nick = self.mgr.nickname()
         self._advert = True
         self._step = 2 if self._only_preset else 1
-        scr = T.make_screen()
-        scr.set_flex_flow(lv.FLEX_FLOW.COLUMN)
-        top = T.box(scr, T.W, lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN)
-        top.set_style_pad_top(T.TOP_PAD + 8, lv.PART.MAIN)
-        top.set_style_pad_hor(T.EDGE, lv.PART.MAIN)
-        self.step_label = T.label(top, "", "small", T.ACCENT)
-        self.title = T.label(top, "", "title", T.TEXT)
-        self.body = T.box(scr, T.W, 1, lv.FLEX_FLOW.COLUMN)
-        self.body.set_flex_grow(1)
-        self.body.add_flag(lv.obj.FLAG.SCROLLABLE)
-        self.body.set_scroll_dir(lv.DIR.VER)
-        self.body.set_style_pad_hor(T.EDGE, lv.PART.MAIN)
-        self.body.set_style_pad_row(10, lv.PART.MAIN)
-        self.body.set_style_pad_top(12, lv.PART.MAIN)
-        foot = T.box(scr, T.W, 64, lv.FLEX_FLOW.ROW)
-        foot.set_style_pad_hor(T.EDGE, lv.PART.MAIN)
-        foot.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        self.back_chip = T.Chip(foot, "Back", self.back, h=44)
-        self.next_chip = T.Chip(foot, "Next", self.next, selected=True, h=44)
-        self._kb = MposKeyboard(scr)
-        self._kb.set_size(T.W, 188)
-        self._kb.add_flag(lv.obj.FLAG.HIDDEN)
         self._name = None
+        scr = T.make_screen()
+        top = T.column(scr, T.W, lv.SIZE_CONTENT, 10)
+        top.set_style_pad_top(14, lv.PART.MAIN)
+        top.set_style_pad_hor(16, lv.PART.MAIN)
+        self.steps = T.column(top, lv.pct(100), lv.SIZE_CONTENT)
+        self.title = T.label(top, "", 24, 700, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        self.body = T.scroll_area(scr, 16, 8)
+        self.body.set_style_pad_ver(10, lv.PART.MAIN)
+        foot = T.row(scr, T.W, 64, 10)
+        foot.set_style_pad_hor(16, lv.PART.MAIN)
+        foot.set_style_pad_bottom(12, lv.PART.MAIN)
+        self.back_button = T.button(foot, "Back", self.back, "outline", 52, width=1)
+        self.back_button.set_flex_grow(1)
+        self.next_button = T.button(foot, "Next", self.next, "primary", 52, width=1)
+        self.next_button.set_flex_grow(1)
+        self._kb = T.keyboard(scr, on_show=self._kb_shown, on_hide=self._kb_hidden)
+        self._foot = foot
         self.show()
         self.setContentView(scr)
 
     # --- steps ----------------------------------------------------------- #
     def show(self):
         self.body.clean()
+        self.steps.clean()
         self._name = None
         if self._only_preset:
-            self.step_label.set_text("Radio")
+            self.steps.add_flag(lv.obj.FLAG.HIDDEN)
         else:
-            self.step_label.set_text("Step %d of 3" % self._step)
+            self.steps.remove_flag(lv.obj.FLAG.HIDDEN)
+            T.step_indicator(self.steps, self._step, 3)
         if self._step == 1:
             self._show_name()
         elif self._step == 2:
             self._show_preset()
         else:
             self._show_hello()
-        if self._only_preset or self._step == 1:
-            self.back_chip.obj.add_flag(lv.obj.FLAG.HIDDEN)
+        back = "Cancel" if self._only_preset else "Back"
+        nxt = "Save" if self._only_preset else ("Finish" if self._step == 3 else "Next")
+        self.back_button.get_child(0).set_text(back)
+        self.next_button.get_child(0).set_text(nxt)
+        if self._step == 1:
+            self.back_button.add_flag(lv.obj.FLAG.HIDDEN)
         else:
-            self.back_chip.obj.remove_flag(lv.obj.FLAG.HIDDEN)
-        self.next_chip.set_text("Save" if self._only_preset else ("Finish" if self._step == 3 else "Next"))
+            self.back_button.remove_flag(lv.obj.FLAG.HIDDEN)
 
-    def _textarea(self, parent, text, placeholder=""):
-        ta = lv.textarea(parent)
-        ta.set_one_line(True)
-        ta.set_text(text)
-        ta.set_placeholder_text(placeholder)
-        ta.set_width(lv.pct(100))
-        ta.set_style_text_font(T.font("body"), lv.PART.MAIN)
-        ta.set_style_bg_color(T.color(T.SURFACE2), lv.PART.MAIN)
-        ta.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
-        ta.set_style_border_width(0, lv.PART.MAIN)
-        ta.set_style_radius(10, lv.PART.MAIN)
-        ta.add_event_cb(lambda e: self._kb.set_textarea(ta), lv.EVENT.FOCUSED, None)
+    def _hint(self, text):
+        return T.label(self.body, text, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                       width=lv.pct(100))
+
+    def _input(self, parent, text, placeholder=""):
+        ta = T.text_input(parent, text, placeholder)
+        ta.add_event_cb(lambda e: self._attach(ta), lv.EVENT.FOCUSED, None)
         return ta
+
+    def _attach(self, ta):
+        if self._kb is not None:
+            self._kb.set_textarea(ta, on_show=self._kb_shown, on_hide=self._kb_hidden)
+
+    def _kb_shown(self):
+        self._foot.add_flag(lv.obj.FLAG.HIDDEN)
+
+    def _kb_hidden(self):
+        self._foot.remove_flag(lv.obj.FLAG.HIDDEN)
 
     def _show_name(self):
         self.title.set_text("What should others see?")
-        T.label(self.body, "Your name on the mesh", "small", T.MUTED)
-        self._name = self._textarea(self.body, self._nick)
-        self._kb.set_textarea(self._name)
-        T.label(self.body, "You can change it later in Settings.", "small", T.MUTED)
+        self._hint("Your name on the mesh")
+        self._name = self._input(self.body, self._nick, "Name")
+        self._hint("Up to 31 characters. You can change it later in Settings.")
 
     def _show_preset(self):
         self.title.set_text("Which mesh are you on?")
-        T.label(self.body, "Radio preset", "small", T.MUTED)
         self._cards = {}
         options = [(p["id"], p["name"], meshcore_presets.describe(p),
                     "Recommended" if p["id"] == meshcore_presets.DEFAULT_PRESET else "")
                    for p in meshcore_presets.PRESETS]
         options.append(("custom", "Custom…", "set every value yourself", ""))
         for pid, name, detail, tag in options:
-            card = T.box(self.body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN, "surface")
-            card.set_style_pad_all(12, lv.PART.MAIN)
-            card.set_style_border_width(2, lv.PART.MAIN)
-            row = T.box(card, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW)
-            row.set_flex_align(lv.FLEX_ALIGN.SPACE_BETWEEN, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-            T.label(row, name, "strong", T.TEXT)
-            if tag:
-                T.label(row, tag, "small", T.ACCENT)
-            T.label(card, detail, "mono", T.MUTED)
-            T.clickable(card, lambda pid=pid: self.pick(pid))
-            self._cards[pid] = card
-        self._custom_box = T.box(self.body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN)
-        self._custom_box.set_style_pad_row(6, lv.PART.MAIN)
+            self._cards[pid] = T.RadioCard(self.body, name, detail, tag, lambda pid=pid: self.pick(pid))
+        self._custom_box = T.column(self.body, lv.pct(100), lv.SIZE_CONTENT, 6)
         c = self._custom or {"freq": 869.618, "bw": 62.5, "sf": 8, "cr": 8}
-        T.label(self._custom_box, "Frequency (MHz)", "small", T.MUTED)
-        self._freq = self._textarea(self._custom_box, "%.3f" % float(c["freq"]))
-        self._bw = self._dropdown("Bandwidth (kHz)", BWS, str(c["bw"]).rstrip("0").rstrip(".") if "." in str(c["bw"]) else str(c["bw"]))
+        T.label(self._custom_box, "Frequency (MHz)", 15, col=T.MUTED)
+        self._freq = self._input(self._custom_box, "%.3f" % float(c["freq"]))
+        self._bw = self._dropdown("Bandwidth (kHz)", BWS, _bw_text(c["bw"]))
         self._sf = self._dropdown("Spreading factor", SFS, str(c["sf"]))
         self._cr = self._dropdown("Coding rate 4/…", CRS, str(c["cr"]))
-        T.label(self.body, FOOTNOTE, "small", T.MUTED, lv.label.LONG_MODE.WRAP).set_width(lv.pct(100))
+        self._hint(FOOTNOTE)
         self.pick(self._preset)
+        self._cards[self._preset].obj.scroll_to_view(False)
 
     def _dropdown(self, title, options, value):
-        T.label(self._custom_box, title, "small", T.MUTED)
-        dd = lv.dropdown(self._custom_box)
-        dd.set_options("\n".join(options))
-        dd.set_width(lv.pct(100))
-        if value in options:
-            dd.set_selected(options.index(value))
-        return dd
+        T.label(self._custom_box, title, 15, col=T.MUTED)
+        return T.dropdown(self._custom_box, options, options.index(value) if value in options else 0)
 
     def pick(self, pid):
         self._preset = pid
         for k, card in self._cards.items():
-            card.set_style_border_color(T.color(T.ACCENT if k == pid else T.LINE), lv.PART.MAIN)
+            card.set_selected(k == pid)
         if pid == "custom":
             self._custom_box.remove_flag(lv.obj.FLAG.HIDDEN)
         else:
@@ -148,16 +141,11 @@ class SetupActivity(Activity):
 
     def _show_hello(self):
         self.title.set_text("Say hello")
-        T.label(self.body, "An advert tells nodes around you who you are, so they can "
-                "message you.", "body", T.TEXT, lv.label.LONG_MODE.WRAP).set_width(lv.pct(100))
-        cb = lv.checkbox(self.body)
-        cb.set_text("Send a flood advert now")
-        cb.set_style_text_font(T.font("body"), lv.PART.MAIN)
-        cb.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
-        if self._advert:
-            cb.add_state(lv.STATE.CHECKED)
-        cb.add_event_cb(lambda e: self._set_advert(cb.has_state(lv.STATE.CHECKED)),
-                        lv.EVENT.VALUE_CHANGED, None)
+        self._hint("An advert tells nodes around you who you are, so they can message you.")
+        card = T.card(self.body, filled=False, pad_ver=0, pad_hor=14, gap=0)
+        row = T.row(card, lv.pct(100), 56, 8)
+        T.label(row, "Send a flood advert now", 16).set_flex_grow(1)
+        self._advert_switch = T.switch(row, self._advert, self._set_advert)
 
     def _set_advert(self, on):
         self._advert = on
@@ -207,8 +195,11 @@ class SetupActivity(Activity):
         self.startActivity(Intent(activity_class=main_activity.MeshCoreHome))
 
     def back(self):
+        if self._only_preset:
+            self.finish()
+            return
         self._collect()
-        if self._step > 1 and not self._only_preset:
+        if self._step > 1:
             self._step -= 1
             self.show()
 

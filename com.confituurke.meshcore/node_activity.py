@@ -17,21 +17,18 @@ class NodeDetailActivity(Activity):
         node = self.mgr.get_node(pk) or {"pubkey": pk}
         d = ui_model.node_detail(node, self.mgr._now_ms())
         scr = T.make_screen()
-        scr.set_flex_flow(lv.FLEX_FLOW.COLUMN)
-        T.Header(scr, d["title"], d["subtitle"], back=self.finish)
-        body = T.box(scr, T.W, 1, lv.FLEX_FLOW.COLUMN)
-        body.set_flex_grow(1)
-        body.add_flag(lv.obj.FLAG.SCROLLABLE)
-        body.set_scroll_dir(lv.DIR.VER)
-        body.set_style_pad_hor(T.EDGE, lv.PART.MAIN)
-        body.set_style_pad_row(10, lv.PART.MAIN)
-        T.label(body, d["info"], "body", T.TEXT, lv.label.LONG_MODE.WRAP).set_width(lv.pct(100))
-        card = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.COLUMN, "surface")
-        card.set_style_pad_all(14, lv.PART.MAIN)
-        card.set_style_pad_row(8, lv.PART.MAIN)
-        for name, value in d["fields"]:
-            T.label(card, name, "small", T.MUTED)
-            role = "mono" if name == "Public key" else "body"
-            v = T.label(card, value, role, T.TEXT, lv.label.LONG_MODE.WRAP)
-            v.set_width(lv.pct(100))
+        T.HeaderSub(scr, d["title"], d["subtitle"], back=self.finish, mono_subtitle=True)
+        body = T.scroll_area(scr, 14, 10)
+        body.set_style_pad_bottom(12, lv.PART.MAIN)
+        lead, via, tail = d["route"]
+        route = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW_WRAP)
+        T.label(route, lead, 16, col=T.MUTED)
+        if via:
+            T.label(route, via, 16, mono=True)
+        T.label(route, tail, 16, col=T.MUTED)
+        T.kv_grid(body, d["fields"])
+        T.section_label(body, "Public key")
+        key = T.card(body, filled=False, pad_ver=10, pad_hor=14)
+        T.label(key, d["pubkey"], 14, mono=True, long_mode=lv.label.LONG_MODE.WRAP,
+                width=lv.pct(100))
         self.setContentView(scr)

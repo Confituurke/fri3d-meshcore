@@ -105,6 +105,19 @@ def test_direct_path_no_return():
     _assert(fake_mpos.drain(m) == 0)
 
 
+def test_reset_route_forgets_the_path_and_announces_it():
+    from meshcore_packet import encode_path_len
+    env, m, peer_pub, secret = _setup()
+    events = []
+    m.add_subscriber(lambda ev, data: events.append(ev))
+    c = m._contacts[peer_pub.hex()]
+    c["path"], c["path_raw"] = b"\x3A", encode_path_len(1)
+    _assert(m.reset_route(peer_pub.hex()) is True)
+    _assert(not m.get_contact(peer_pub.hex()).get("path"))
+    _assert("contacts" in events, events)
+    _assert(m.reset_route(peer_pub.hex()) is False)     # nothing left to forget
+
+
 def test_queue_order_is_by_due_time():
     env, m, peer_pub, secret = _setup()
     m._enqueue_tx(b"\x11late", delay_ms=500)

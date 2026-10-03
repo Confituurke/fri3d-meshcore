@@ -135,5 +135,13 @@ def test_incoming_channel_msg_has_snr_hops():
     _assert(msg["snr"] == 6.5 and msg["hops"] == 3 and msg["rx_ms"] == env.now_ms, msg)
 
 
+def test_flooded_advert_keeps_the_repeater_path():
+    env, m, events = _setup()
+    pub, raw = fake_mpos.advert_frame(SEED, "Alex", 1000, path=b"\x3a\xf1")
+    m._ingest(raw, rssi=-90, snr=3)
+    n = _nodes(m)[pub.hex()]
+    _assert(n["hops"] == 2 and n["path"] == "3af1", n)
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

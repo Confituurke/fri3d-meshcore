@@ -91,15 +91,25 @@ def test_tz_offset():
 
 def test_delivery_states():
     ui = _ui()
-    _assert(ui.delivery({"incoming": False, "tx": False}) == ("⏳", "sending", ui.MUTED))
-    _assert(ui.delivery({"incoming": False, "tx": True, "delivered": True, "ack": "ab"})
-            == ("✓", "delivered", ui.OK))
-    _assert(ui.delivery({"incoming": False, "tx": True, "failed": True, "ack": "ab"})
-            == ("✗", "no ack after 4 tries · tap to resend", ui.ERR))
-    _assert(ui.delivery({"incoming": False, "tx": True, "heard": 4}) == ("✓", "heard ×4", ui.OK))
-    _assert(ui.delivery({"incoming": False, "tx": True, "heard": 0, "unheard": True})
-            == ("?", "not heard by a repeater · tap to resend", ui.WARN))
-    _assert(ui.delivery({"incoming": False, "tx": True, "heard": 0}) == ("→", "sent", ui.MUTED))
+    ts = NOW - 60                                   # 14:31 UTC
+    d = ui.delivery({"incoming": False, "tx": False, "ts": ts}, 0)
+    _assert(d == {"icon": None, "text": "14:31 · sending", "color": ui.MUTED, "dots": 0}, d)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "heard": 0}, 0)
+    _assert(d["text"] == "14:31 · sent" and d["dots"] == 0, d)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "heard": 4}, 0)
+    _assert(d == {"icon": None, "text": "14:31 · heard ×4", "color": ui.MUTED, "dots": 4}, d)
+    _assert(ui.delivery({"incoming": False, "tx": True, "ts": ts, "heard": 9}, 0)["dots"] == 6)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "heard": 0, "unheard": True}, 0)
+    _assert(d["text"] == "not heard by a repeater · tap to resend" and d["color"] == ui.WARN, d)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "ack": "ab", "delivered": True,
+                     "ack_ts": NOW - 30, "ack_snr": 7.0}, 0)
+    _assert(d == {"icon": "check", "text": "delivered 14:31 · SNR 7.0", "color": ui.MUTED,
+                  "dots": 0, "icon_color": ui.DELIVERED}, d)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "ack": "ab", "delivered": True}, 0)
+    _assert(d["text"] == "delivered 14:31", d)
+    d = ui.delivery({"incoming": False, "tx": True, "ts": ts, "ack": "ab", "failed": True}, 0)
+    _assert(d == {"icon": "retry", "text": "no ack after 4 tries · tap to resend",
+                  "color": ui.FAIL_TEXT, "dots": 0, "icon_color": ui.FAIL_TEXT}, d)
 
 
 def test_budget_counts_utf8_bytes():
@@ -140,15 +150,19 @@ def test_node_detail():
     pk = "f1a7" + "33" * 28 + "9c2e"
     d = ui.node_detail({"pubkey": pk, "id": "f1", "type": 2, "name": "Gent-Noord", "snr": -3.5,
                         "hops": 2, "heard_ms": now_ms - 840 * 1000, "verified": True,
-                        "lat": 51.05, "lon": 3.72}, now_ms)
+                        "lat": 51.05, "lon": 3.72, "path": "3af1"}, now_ms)
     _assert(d["title"] == "Gent-Noord")
     _assert(d["subtitle"] == "repeater · F1A7…9C2E", d["subtitle"])
     _assert(d["info"] == "2 hops · SNR −3.5 dB · heard 14 min ago", d["info"])
-    _assert(("Location", "51.05000, 3.72000") in d["fields"], d["fields"])
+    _assert(d["route"] == ("2 hops via ", "3A › F1", " · SNR −3.5 dB · heard 14 min ago"), d["route"])
+    _assert(("Location", "51.0500, 3.7200") in d["fields"], d["fields"])
+    _assert(("Last SNR", "−3.5 dB") in d["fields"], d["fields"])
+    _assert(d["pubkey"] == pk, d)
     _assert(("Signature", "verified") in d["fields"])
     d2 = ui.node_detail({"pubkey": pk, "type": 1, "name": "", "snr": None, "hops": 0,
                          "heard_ms": now_ms, "verified": False}, now_ms)
     _assert(d2["subtitle"].startswith("companion · ") and d2["info"] == "direct · heard now", d2)
+    _assert(d2["route"] == ("direct", "", " · heard now"), d2["route"])
     _assert(("Signature", "not checked") in d2["fields"])
 
 
@@ -158,12 +172,22 @@ def test_radio_texts():
           "peak_rssi_30m": -74.0, "packets_per_h": 6, "tx_air_pct": 0.1}
     t = ui.radio_texts(st)
     _assert(t == {"subtitle": "RX on · last packet 40 s ago", "noise": "−106",
-                  "peak": "Peak −74", "packets": "Packets 6/h", "tx_air": "TX air 0.1 %"}, t)
+                  "stats": [("Peak", "−74"), ("Packets", "6/h"), ("TX air", "0.1 %")]}, t)
     t = ui.radio_texts({"rx_on": False, "last_rx_s": None, "noise_dbm": None, "noise_series": [],
                         "peak_rssi_30m": None, "packets_per_h": 0, "tx_air_pct": 0.0})
-    _assert(t["subtitle"] == "RX off" and t["noise"] == "—" and t["peak"] == "Peak —", t)
+    _assert(t["subtitle"] == "RX off" and t["noise"] == "—" and t["stats"][0] == ("Peak", "—"), t)
     _assert(ui.radio_texts(dict(st, last_rx_s=None))["subtitle"] == "RX on · nothing heard yet")
     _assert(ui.radio_texts(dict(st, last_rx_s=7200))["subtitle"] == "RX on · last packet 2 h ago")
+
+
+def test_node_rows_contacts_and_search():
+    ui = _ui()
+    now_ms = 10 * 3600 * 1000
+    nodes = [{"pubkey": "a3" * 32, "id": "a3", "type": 1, "name": "Alex", "hops": 0, "heard_ms": now_ms},
+             {"pubkey": "f1" * 32, "id": "f1", "type": 2, "name": "Gent-Noord", "hops": 2, "heard_ms": now_ms}]
+    _assert([r["name"] for r in ui.node_rows(nodes, now_ms, "contacts", contacts={"a3" * 32})] == ["Alex"])
+    _assert([r["name"] for r in ui.node_rows(nodes, now_ms, query="gent")] == ["Gent-Noord"])
+    _assert([r["name"] for r in ui.node_rows(nodes, now_ms, query="A3")] == ["Alex"])
 
 
 def test_age_text():
