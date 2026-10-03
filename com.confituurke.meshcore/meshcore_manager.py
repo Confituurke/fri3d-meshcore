@@ -387,13 +387,10 @@ class MeshCoreManager:
         self._notify("service", on)
 
     def _editor(self, filename="config.json"):
-        """A prefs editor holding the prefs lock until _commit(); a lock stuck for 2 s is
-        taken over rather than deadlocking the radio worker."""
+        """A prefs editor holding the prefs lock until _commit(), which always releases it.
+        (MicroPython's lock.acquire() has no timeout: every _editor() needs its _commit().)"""
         from mpos import SharedPreferences
-        try:
-            self._prefs_lock.acquire(1, 2)
-        except TypeError:
-            self._prefs_lock.acquire()
+        self._prefs_lock.acquire()
         try:
             return SharedPreferences(NICKNAME_PREFS, filename=filename).edit()
         except Exception:
