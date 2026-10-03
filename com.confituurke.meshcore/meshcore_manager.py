@@ -75,6 +75,25 @@ def tdiff(a, b):
     return ((a - b + _TICKS_HALF) % _TICKS_PERIOD) - _TICKS_HALF
 
 
+def parse_path(text, size):
+    """Hex hops ("a1,b2" or "a1 b2"), `size` bytes each -> (path bytes, None) or (None, why)."""
+    hops = [t for t in text.replace(",", " ").split() if t]
+    if not hops:
+        return None, "at least one hop"
+    if len(hops) * size > 64:
+        return None, "at most %d hops of %d byte%s (64 bytes)" % (64 // size, size,
+                                                                  "" if size == 1 else "s")
+    out = b""
+    for h in hops:
+        if len(h) != 2 * size:
+            return None, "each hop is %d hex characters" % (2 * size)
+        try:
+            out += bytes.fromhex(h)
+        except ValueError:
+            return None, "%s is not hex" % h
+    return out, None
+
+
 def _metres(lat1, lon1, lat2, lon2):
     """Distance between two nearby points (equirectangular: plenty for "has it moved")."""
     import math
@@ -1723,7 +1742,7 @@ class MeshCoreManager:
         if contact is None:
             return
         path = dec.get("path") or b""
-        if contact.get("path") == path:
+        if contact.get("path") == path or contact.get("route_mode") == "manual":
             return
         contact["path"] = path
         contact["path_raw"] = dec.get("path_len_raw", len(path))
@@ -1733,19 +1752,54 @@ class MeshCoreManager:
         self._save_contacts()
 
     def reset_route(self, pubkey_hex):
-        """Forget the learned direct route to a contact (the next message floods and the
-        contact teaches us a fresh route). Returns False when there was none."""
+        """Back to auto with no path: the next message floods and the contact teaches us a
+        fresh route. Returns False when there was nothing to reset."""
         contact = self._contacts.get(pubkey_hex)
-        if contact is None or not contact.get("path"):
+        if contact is None or (not contact.get("path") and contact.get("route_mode", "auto") == "auto"):
             return False
-        self._reset_path(pubkey_hex)
+        contact["route_mode"] = "auto"
+        contact["path"] = None
+        contact["path_raw"] = 0
+        self._save_contacts()
         self._notify("contacts", None)
         return True
 
-    def _reset_path(self, pubkey_hex):
-        """The direct route stopped working -- forget it and flood again (resetPathTo)."""
+    def route_mode(self, pubkey_hex):
+        """"auto" (the learned path, else flood), "flood" or "manual"."""
+        return (self._contacts.get(pubkey_hex) or {}).get("route_mode", "auto")
+
+    def route_text(self, pubkey_hex):
+        """The path as hex hops ("A1,B2"), or "" without one."""
+        c = self._contacts.get(pubkey_hex) or {}
+        path = c.get("path") or b""
+        size = ((c.get("path_raw") or 0) >> 6) + 1
+        return ",".join(path[i:i + size].hex().upper() for i in range(0, len(path), size))
+
+    def set_route(self, pubkey_hex, mode, path_text=None):
         contact = self._contacts.get(pubkey_hex)
-        if contact is None or not contact.get("path"):
+        if contact is None:
+            return (False, "not a contact")
+        if mode == "manual":
+            path, err = parse_path(path_text or "", self._hash_size)
+            if err:
+                return (False, err)
+            contact["path"] = path
+            contact["path_raw"] = encode_path_len(len(path) // self._hash_size, self._hash_size)
+        elif mode not in ("auto", "flood"):
+            return (False, "auto, flood or manual")
+        elif contact.get("route_mode") == "manual":
+            contact["path"] = None              # a typed path is not a learned one
+            contact["path_raw"] = 0
+        contact["route_mode"] = mode
+        self._save_contacts()
+        self._notify("contacts", None)
+        return (True, None)
+
+    def _reset_path(self, pubkey_hex):
+        """The direct route stopped working -- forget it and flood again (resetPathTo). A
+        path set by hand stays: it was chosen on purpose."""
+        contact = self._contacts.get(pubkey_hex)
+        if contact is None or not contact.get("path") or contact.get("route_mode") == "manual":
             return
         contact["path"] = None
         contact["path_raw"] = 0
@@ -1757,7 +1811,7 @@ class MeshCoreManager:
     def _route(contact):
         """(route_type, path_len_raw, path) for a packet to this contact."""
         path = (contact or {}).get("path")
-        if path:
+        if path and (contact or {}).get("route_mode") != "flood":
             return (ROUTE_TYPE_DIRECT, (contact.get("path_raw") or len(path)), path)
         return (ROUTE_TYPE_FLOOD, encode_path_len(0), b"")
 
@@ -2700,6 +2754,7 @@ class MeshCoreManager:
                     "seq": 0,
                     "path": self._unhex(entry.get("path")),
                     "path_raw": entry.get("path_raw", 0),
+                    "route_mode": entry.get("route_mode", "auto"),
                     "sync_since": entry.get("sync_since", 0),
                     "lat": entry.get("lat"),
                     "lon": entry.get("lon"),
@@ -2753,9 +2808,11 @@ class MeshCoreManager:
                     if c.get(k) is not None:
                         entry[k] = c[k]
                 path = c.get("path")
-                if path:                                  # the learned direct route
+                if path:                                  # the learned or typed route
                     entry["path"] = path.hex()
                     entry["path_raw"] = c.get("path_raw") or len(path)
+                if c.get("route_mode", "auto") != "auto":
+                    entry["route_mode"] = c["route_mode"]
                 data[h] = entry
             ed = self._editor()
             ed.put_dict("contacts", data)
