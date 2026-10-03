@@ -1,4 +1,4 @@
-"""Main screen: five tabs (Chats, Nodes, Map, Radio, Settings) over a bottom tab bar.
+"""Main screen: five tabs (Chats, Contacts, Map, Radio, Settings) over a bottom tab bar.
 
 Every screen module is imported here, at load time: the app directory is only on sys.path
 while MicroPythonOS imports this entrypoint."""
@@ -23,7 +23,7 @@ from meshcore_manager import MeshCoreManager, MESHCORE_APP
 
 
 class MeshCoreHome(Activity):
-    TABS = (("Chats", "chat"), ("Nodes", "nodes"), ("Map", "map"), ("Radio", "radio"),
+    TABS = (("Chats", "chat"), ("Contacts", "nodes"), ("Map", "map"), ("Radio", "radio"),
             ("Settings", "settings"))
 
     def tab_classes(self):

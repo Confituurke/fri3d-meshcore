@@ -263,9 +263,14 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
         meta = "direct" if hops == 0 else ("1 hop" if hops == 1 else "%d hops" % hops)
         if n.get("snr") is not None:
             meta += " · SNR " + snr_text(n["snr"])
-        rows.append({"pubkey": n.get("pubkey"), "hex": (n.get("id") or "??").upper(),
-                     "kind": kind, "name": display(n.get("name")) or "?", "age": age_text(age_s),
-                     "age_color": _age_color(age_s), "meta": meta})
+        heard = "heard_ms" in n
+        if not heard:
+            meta = "not heard yet"
+        rows.append({"pubkey": n.get("pubkey"), "hex": (n.get("id") or n.get("pubkey", "??")[:2]).upper(),
+                     "kind": kind, "name": display(n.get("name")) or "?",
+                     "age": age_text(age_s) if heard else "",
+                     "age_color": _age_color(age_s), "meta": meta,
+                     "contact": n.get("pubkey") in contacts})
     return rows
 
 

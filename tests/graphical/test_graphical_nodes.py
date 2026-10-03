@@ -13,28 +13,83 @@ class TestNodes(unittest.TestCase):
         mc_fixtures.seed_nodes(self.m)
 
     def tearDown(self):
+        import ui_theme
+        ui_theme.close_sheets()
         mpos.ui.remove_and_stop_all_activities()
         wait_for_render(5)
 
-    def test_node_rows_and_filters(self):
-        act = mc_fixtures.open_app(tab="Nodes")
-        self.assertEqual(len(act._tab._order), 4)
-        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "All 4"))
-        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "2 hops · SNR −3.5"))
+    def _discovered(self, act):
+        act._tab.open_discovered()
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "DiscoveredActivity")
+        return page
+
+    def test_contacts_tab_lists_contacts_and_counts_the_discovered(self):
+        act = mc_fixtures.open_app(tab="Contacts")
+        self.assertEqual(act._tab._order, [])
+        self.assertIn("Discovered", act._tab.nodes.empty.get_text())
+        self.assertEqual(act._tab.discovered_count.get_text(), "4")
+        self.m.add_contact(mc_fixtures.GENT, "Gent-Noord", 2)
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act._tab.refresh()
+        self.assertEqual(sorted(act._tab._order), sorted([mc_fixtures.GENT, mc_fixtures.BOB]))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "All 2"))
+        self.assertEqual(act._tab.discovered_count.get_text(), "2")
         self.assertTrue(click_label("Repeaters"))
         wait_for_render(10)
-        self.assertEqual(len(act._tab._order), 2)
+        self.assertEqual(act._tab._order, [mc_fixtures.GENT])
 
-    def test_tap_chat_node_opens_dm(self):
-        mc_fixtures.open_app(tab="Nodes")
+    def test_discovered_adds_with_plus_and_ticks_contacts(self):
+        act = mc_fixtures.open_app(tab="Contacts")
+        page = self._discovered(act)
+        self.assertEqual(len(page.nodes._order), 4)
+        self.assertIn("4 not added", page.header.subtitle.get_text())
+        row = page.nodes._rows[mc_fixtures.BOB][0]
+        row.plus.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertTrue(self.m.is_contact(mc_fixtures.BOB))
+        self.assertTrue(page.nodes._rows[mc_fixtures.BOB][1])          # rebuilt with a tick
+        self.assertFalse(hasattr(page.nodes._rows[mc_fixtures.BOB][0], "plus"))
+        page.finish()
+        wait_for_render(20)
+        self.assertEqual(act._tab._order, [mc_fixtures.BOB])
+        self.assertEqual(act._tab.discovered_count.get_text(), "3")
+
+    def test_discovered_clear_keeps_contacts(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab="Contacts")
+        page = self._discovered(act)
+        page.ask_clear()
+        import ui_theme
+        ui_theme.ActionSheet.shown[-1].rows["Clear 3 nodes"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(page.nodes._order, [mc_fixtures.BOB])
+        self.assertEqual(self.m.discovered_count(), 0)
+
+    def test_discovered_long_press_can_remove_one(self):
+        act = mc_fixtures.open_app(tab="Contacts")
+        page = self._discovered(act)
+        page.menu(mc_fixtures.GENT)
+        import ui_theme
+        sheet = ui_theme.ActionSheet.shown[-1]
+        self.assertTrue("Add to contacts" in sheet.rows and "Remove from discovered" in sheet.rows)
+        sheet.rows["Remove from discovered"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertIsNone(self.m.get_node(mc_fixtures.GENT))
+        self.assertFalse(mc_fixtures.GENT in page.nodes._order)
+
+    def test_tap_chat_node_in_discovered_opens_dm(self):
+        act = mc_fixtures.open_app(tab="Contacts")
+        self._discovered(act)
         self.assertTrue(click_label("Bob"))
         wait_for_render(20)
         self.assertTrue(self.m.is_contact(mc_fixtures.BOB))
-        act = mpos.ui.screen_stack[-1][0]
-        self.assertEqual(type(act).__name__, "DMChatActivity")
+        self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "DMChatActivity")
 
-    def test_tap_repeater_opens_detail(self):
-        mc_fixtures.open_app(tab="Nodes")
+    def test_tap_repeater_contact_opens_detail(self):
+        self.m.add_contact(mc_fixtures.GENT, "Gent-Noord", 2)
+        mc_fixtures.open_app(tab="Contacts")
         self.assertTrue(click_label("Gent-Noord"))
         wait_for_render(20)
         act = mpos.ui.screen_stack[-1][0]
@@ -44,29 +99,24 @@ class TestNodes(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Last SNR"))
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "−3.5 dB"))
 
-    def test_star_chip_shows_saved_contacts(self):
-        self.m.add_contact(mc_fixtures.BOB, "Bob")
-        act = mc_fixtures.open_app(tab="Nodes")
-        act._tab._chips["contacts"].obj.send_event(lv.EVENT.CLICKED, None)
-        wait_for_render(10)
-        self.assertEqual(act._tab._order, [mc_fixtures.BOB])
-
-    def test_search_filters_by_name_and_closes(self):
-        act = mc_fixtures.open_app(tab="Nodes")
+    def test_search_filters_contacts_and_closes(self):
+        for pk, typ, name in ((mc_fixtures.BOB, 1, "Bob"), (mc_fixtures.GENT, 2, "Gent-Noord")):
+            self.m.add_contact(pk, name, typ)
+        act = mc_fixtures.open_app(tab="Contacts")
         tab = act._tab
         tab.search_button.send_event(lv.EVENT.CLICKED, None)
         wait_for_render(10)
-        tab.search.set_text("aalst")
+        tab.search.set_text("gent")
         wait_for_render(10)
-        self.assertEqual(len(tab._order), 1)
+        self.assertEqual(tab._order, [mc_fixtures.GENT])
         tab.close_search()
         wait_for_render(10)
-        self.assertEqual(len(tab._order), 4)
+        self.assertEqual(len(tab._order), 2)
         self.assertTrue(tab.search_bar.has_flag(lv.obj.FLAG.HIDDEN))
 
     def test_advert_button_zero_hop(self):
         rec = mc_fixtures.Recorder(self.m, "advertise", result=(True, None))
-        mc_fixtures.open_app(tab="Nodes")
+        mc_fixtures.open_app(tab="Contacts")
         self.assertTrue(click_label("Advert"))
         wait_for_render(5)
         self.assertEqual(rec.calls[0][2], {"flood": False})

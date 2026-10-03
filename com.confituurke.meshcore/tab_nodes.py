@@ -1,42 +1,114 @@
-"""Nodes tab: everything heard via adverts (companions, repeaters, rooms), most recent
-first. Tapping a companion opens a direct chat; anything else opens its detail screen."""
+"""Contacts tab: the saved contacts (companions, repeaters, rooms, sensors) with what was last
+heard of them. The Discovered button opens every node heard, with a + to add those that are
+not contacts yet. Tapping a companion opens a direct chat; anything else its detail screen."""
 
 import lvgl as lv
 
-from mpos import Intent
+from mpos import Activity, Intent
 
 import ui_model
 import ui_theme as T
 import node_activity
 import thread_activity
+from meshcore_manager import MeshCoreManager
 from ui_tabs import Tab
 
-FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"),
-           ("new", "New"))
+FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"))
 KIND_TAGS = {"chat": "chat", "rptr": "rptr", "room": "room", "sensor": "sens"}
 
 
+def open_node(activity, mgr, pubkey, kind):
+    if kind == "chat":
+        if not mgr.is_contact(pubkey):
+            mgr.add_contact(pubkey)
+        intent = Intent(activity_class=thread_activity.DMChatActivity)
+    else:
+        intent = Intent(activity_class=node_activity.NodeDetailActivity)
+    intent.putExtra("pubkey", pubkey)
+    activity.startActivity(intent)
+
+
+class _NodeList:
+    """A filterable list of node rows; `trailing(row, r)` may add a widget at the right."""
+
+    def __init__(self, parent, activity, mgr, filters, on_menu, on_change, trailing=None):
+        self.activity = activity
+        self.on_change = on_change
+        self.mgr = mgr
+        self.filt = "all"
+        self.query = ""
+        self.on_menu = on_menu
+        self.trailing = trailing
+        self._rows = {}
+        self._order = []
+        self.chips_bar = T.chip_bar(parent, 6)
+        self._chips = {}
+        for key, text in filters:
+            self._chips[key] = T.Chip(self.chips_bar, text, lambda k=key: self.set_filter(k),
+                                      key == "all", 14, 12)
+        self.empty = T.label(parent, "", 16, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                             width=T.W - 32)
+        self.empty.set_style_pad_all(16, lv.PART.MAIN)
+        self.list = T.scroll_area(parent)
+
+    def set_filter(self, key):
+        self.filt = key
+        for k, chip in self._chips.items():
+            chip.set_selected(k == key)
+        self.on_change()
+
+    def show(self, model, empty_text):
+        keep = set(r["pubkey"] for r in model)
+        for key in list(self._rows):
+            if key not in keep:
+                self._rows.pop(key)[0].obj.delete()
+        rows = {}
+        for i, r in enumerate(model):
+            entry = self._rows.get(r["pubkey"])
+            if entry is None or entry[1] != r["contact"]:
+                if entry is not None:
+                    entry[0].obj.delete()
+                row = T.ListRow(self.list, lambda pk=r["pubkey"], kind=r["kind"]:
+                                open_node(self.activity, self.mgr, pk, kind))
+                T.on_long_press(row.obj, lambda pk=r["pubkey"]: self.on_menu(pk))
+                if self.trailing is not None:
+                    self.trailing(row, r)
+                entry = (row, r["contact"])
+            row = entry[0]
+            row.set_avatar("node", r["hex"] + "\n" + KIND_TAGS.get(r["kind"], r["kind"]))
+            row.title.set_text(r["name"])
+            row.right.set_text(r["age"])
+            row.right.set_style_text_color(T.color(r["age_color"]), lv.PART.MAIN)
+            row.line2.set_text(r["meta"])
+            if row.obj.get_index() != i:
+                row.obj.move_to_index(i)
+            rows[r["pubkey"]] = entry
+        self._rows = rows
+        self._order = [r["pubkey"] for r in model]
+        if rows:
+            self.empty.add_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self.empty.set_text(empty_text)
+            self.empty.remove_flag(lv.obj.FLAG.HIDDEN)
+
+
 class NodesTab(Tab):
-    title = "Nodes"
+    title = "Contacts"
 
     def build(self, parent, activity):
         self.activity = activity
         self.mgr = activity.mgr
-        self.filt = "all"
-        self.query = ""
-        self._rows = {}          # pubkey -> T.ListRow
-        self._order = []         # pubkeys in display order (MicroPython dicts are unordered)
         self._kb = None
         self._timer = None
-        header = T.HeaderTop(parent, "Nodes", pad_right=8, gap=4)
+        header = T.HeaderTop(parent, "Contacts", pad_right=8, gap=4)
         self.search_button = T.icon_button(header.obj, "search", self.open_search)
+        self.discovered = T.row(header.obj, lv.SIZE_CONTENT, 40, 4)
+        T.outline(self.discovered, T.OUTLINE, 20, 2)
+        self.discovered.set_style_pad_hor(10, lv.PART.MAIN)
+        T.icon(self.discovered, "person_add", T.TEXT)
+        self.discovered_count = T.label(self.discovered, "", 15, 600)
+        T.clickable(self.discovered, self.open_discovered)
         T.advert_button(header.obj, self.advert)
-        self.chips_bar = T.chip_bar(parent, 6)
-        self._chips = {"contacts": T.Chip(self.chips_bar, "", lambda: self.set_filter("contacts"),
-                                          False, 14, 12, "star")}
-        for key, text in FILTERS:
-            self._chips[key] = T.Chip(self.chips_bar, text, lambda k=key: self.set_filter(k),
-                                      key == "all", 14, 12)
         self.search_bar = T.row(parent, T.W, 44, 8)
         self.search_bar.set_style_pad_left(12, lv.PART.MAIN)
         self.search_bar.set_style_pad_right(4, lv.PART.MAIN)
@@ -48,12 +120,25 @@ class NodesTab(Tab):
         self.status = T.label(parent, "", 15, col=T.MUTED)
         self.status.set_style_pad_hor(16, lv.PART.MAIN)
         self.status.add_flag(lv.obj.FLAG.HIDDEN)
-        self.empty = T.label(parent, "", 16, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
-                             width=T.W - 32)
-        self.empty.set_style_pad_all(16, lv.PART.MAIN)
-        self.list = T.scroll_area(parent)
+        self.nodes = _NodeList(parent, activity, self.mgr, FILTERS, self.menu, self.refresh)
         self._timer = lv.timer_create(lambda t: self.refresh(), 30000, None)
         self.refresh()
+
+    # compatibility with the list widget's names used by tests and the main screen
+    @property
+    def _rows(self):
+        return {k: v[0] for k, v in self.nodes._rows.items()}
+
+    @property
+    def _order(self):
+        return self.nodes._order
+
+    @property
+    def _chips(self):
+        return self.nodes._chips
+
+    def set_filter(self, key):
+        self.nodes.set_filter(key)
 
     def destroy(self):
         if self._timer is not None:
@@ -63,11 +148,10 @@ class NodesTab(Tab):
 
     # --- search ------------------------------------------------------------ #
     def open_search(self):
-        self.chips_bar.add_flag(lv.obj.FLAG.HIDDEN)
+        self.nodes.chips_bar.add_flag(lv.obj.FLAG.HIDDEN)
         self.search_bar.remove_flag(lv.obj.FLAG.HIDDEN)
         if self._kb is None:
-            # The keyboard floats over the bottom of the screen, tab bar included.
-            self._kb = T.keyboard(self.list.get_screen(), self.search, floating=True)
+            self._kb = T.keyboard(self.nodes.list.get_screen(), self.search, floating=True)
         self.search.add_state(lv.STATE.FOCUSED)
         self._kb.show_keyboard()
 
@@ -76,19 +160,18 @@ class NodesTab(Tab):
         self.search.set_text("")
         self.search.remove_state(lv.STATE.FOCUSED)
         self.search_bar.add_flag(lv.obj.FLAG.HIDDEN)
-        self.chips_bar.remove_flag(lv.obj.FLAG.HIDDEN)
+        self.nodes.chips_bar.remove_flag(lv.obj.FLAG.HIDDEN)
         self._on_query()
 
     def _drop_keyboard(self):
-        # The keyboard lives on the screen, not in the tab's container: delete it here.
         if self._kb is not None:
             self._kb.delete()
             self._kb = None
 
     def _on_query(self):
         q = self.search.get_text()
-        if q != self.query:
-            self.query = q
+        if q != self.nodes.query:
+            self.nodes.query = q
             self.refresh()
 
     # --- behaviour --------------------------------------------------------- #
@@ -98,70 +181,112 @@ class NodesTab(Tab):
         self.status.set_style_text_color(T.color(T.MUTED if ok else T.FAIL_TEXT), lv.PART.MAIN)
         self.status.remove_flag(lv.obj.FLAG.HIDDEN)
 
-    def set_filter(self, key):
-        self.filt = key
-        for k, chip in self._chips.items():
-            chip.set_selected(k == key)
-        self.refresh()
-
     def refresh(self):
-        nodes = self.mgr.get_learned_companions()
-        now = self.mgr._now_ms()
-        contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
-        model = ui_model.node_rows(nodes, now, self.filt, contacts, self.query)
-        n_all = len(nodes)
-        n_new = len(ui_model.node_rows(nodes, now, "new", contacts))
-        self._chips["all"].set_text("All %d" % n_all if n_all else "All")
-        self._chips["new"].set_text("New %d" % n_new if n_new else "New")
-        keep = set(r["pubkey"] for r in model)
-        for key in list(self._rows):
-            if key not in keep:
-                self._rows.pop(key).obj.delete()
-        rows = {}
-        for i, r in enumerate(model):
-            row = self._rows.get(r["pubkey"])
-            if row is None:
-                row = T.ListRow(self.list, lambda pk=r["pubkey"], kind=r["kind"]: self.open_node(pk, kind))
-                T.on_long_press(row.obj, lambda pk=r["pubkey"]: self.menu(pk))
-            row.set_avatar("node", r["hex"] + "\n" + KIND_TAGS.get(r["kind"], r["kind"]))
-            row.title.set_text(r["name"])
-            row.right.set_text(r["age"])
-            row.right.set_style_text_color(T.color(r["age_color"]), lv.PART.MAIN)
-            row.line2.set_text(r["meta"])
-            if row.obj.get_index() != i:
-                row.obj.move_to_index(i)
-            rows[r["pubkey"]] = row
-        self._rows = rows
-        self._order = [r["pubkey"] for r in model]
-        if rows:
-            self.empty.add_flag(lv.obj.FLAG.HIDDEN)
+        contacts = self.mgr.get_contact_nodes()
+        keys = set(c["pubkey"] for c in contacts)
+        model = ui_model.node_rows(contacts, self.mgr._now_ms(), self.nodes.filt, keys,
+                                   self.nodes.query)
+        n_all = len(contacts)
+        self.nodes._chips["all"].set_text("All %d" % n_all if n_all else "All")
+        n = self.mgr.discovered_count()
+        self.discovered_count.set_text(str(n) if n else "")
+        if n:
+            self.discovered_count.remove_flag(lv.obj.FLAG.HIDDEN)
         else:
-            self.empty.set_text(self._empty_text(n_all))
-            self.empty.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.discovered_count.add_flag(lv.obj.FLAG.HIDDEN)
+        self.nodes.show(model, self._empty_text(n_all))
 
     def _empty_text(self, n_all):
         if not n_all:
-            return "No nodes heard yet. Send an advert to say hello."
-        if self.query:
-            return "No node matches \"%s\"." % self.query
-        if self.filt == "contacts":
-            return "No saved contacts yet. Tap a companion to chat; it is saved as a contact."
-        return "Nothing here yet."
+            return ("No contacts yet. Nodes your radio hears are listed under Discovered "
+                    "(top right); tap + there to add one.")
+        if self.nodes.query:
+            return "No contact matches \"%s\"." % self.nodes.query
+        return "No contacts of this kind."
+
+    def open_discovered(self):
+        self.activity.startActivity(Intent(activity_class=DiscoveredActivity))
+
+    def open_node(self, pubkey, kind):
+        open_node(self.activity, self.mgr, pubkey, kind)
 
     def menu(self, pubkey):
         import quick_actions
         self.sheet = quick_actions.node_menu(self.activity, self.mgr, pubkey)
 
-    def open_node(self, pubkey, kind):
-        if kind == "chat":
-            if not self.mgr.is_contact(pubkey):
-                self.mgr.add_contact(pubkey)
-            intent = Intent(activity_class=thread_activity.DMChatActivity)
-        else:
-            intent = Intent(activity_class=node_activity.NodeDetailActivity)
-        intent.putExtra("pubkey", pubkey)
-        self.activity.startActivity(intent)
-
     def on_event(self, event, data):
         if event in ("node", "contacts"):
             self.refresh()
+
+    def on_resume(self):
+        self.refresh()          # contacts added or removed on another screen
+
+
+class DiscoveredActivity(Activity):
+    """Every node heard, most recent first: a + adds one to the contacts, a tick marks those
+    that already are. Long press: the node's menu, with removing it from this list."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        scr = T.make_screen()
+        self.header = T.HeaderSub(scr, "Discovered", "", back=self.finish,
+                                  menu=self.more)
+        self.nodes = _NodeList(scr, self, self.mgr, FILTERS + (("new", "New"),), self.menu,
+                               self.refresh, self._trailing)
+        self.refresh()
+        self.setContentView(scr)
+
+    def _trailing(self, row, r):
+        if r["contact"]:
+            T.icon(row.obj, "check", T.MUTED)
+        else:
+            b = T.icon_button(row.obj, "plus", lambda pk=r["pubkey"]: self.add(pk), 44, 44,
+                              T.ACCENT)
+            row.plus = b
+
+    def add(self, pk):
+        node = self.mgr.get_node(pk) or {}
+        self.mgr.add_contact(pk, node.get("name"), node.get("type", 1))
+        self.refresh()
+
+    def refresh(self):
+        nodes = self.mgr.get_learned_companions()
+        contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
+        model = ui_model.node_rows(nodes, self.mgr._now_ms(), self.nodes.filt, contacts,
+                                   self.nodes.query)
+        new = sum(1 for n in nodes if n.get("pubkey") not in contacts)
+        self.header.subtitle.set_text("%d heard · %d not added" % (len(nodes), new))
+        self.nodes.show(model, "No nodes heard yet. Send an advert to say hello."
+                        if not nodes else "Nothing here yet.")
+
+    def menu(self, pk):
+        import quick_actions
+        self.sheet = quick_actions.node_menu(self, self.mgr, pk, discovered=True)
+
+    def more(self):
+        self.sheet = T.ActionSheet("Discovered", [
+            ("Clear discovered", self.ask_clear, "danger")],
+            "Nodes that are not contacts")
+
+    def ask_clear(self):
+        self.sheet = T.ActionSheet("Clear the discovered list?", [
+            ("Clear %d nodes" % self.mgr.discovered_count(), self.clear, "danger"),
+            ("Cancel", lambda: None)], "Contacts stay. Nodes come back when heard again.")
+
+    def clear(self):
+        self.mgr.clear_discovered()
+        self.refresh()
+
+    def onResume(self, screen):
+        super().onResume(screen)
+        self.mgr.add_subscriber(self._on_event)
+        self.refresh()
+
+    def onPause(self, screen):
+        T.close_sheets()
+        self.mgr.remove_subscriber(self._on_event)
+        super().onPause(screen)
+
+    def _on_event(self, event, data):
+        if event in ("node", "contacts"):
+            self.update_ui_threadsafe_if_foreground(self.refresh)

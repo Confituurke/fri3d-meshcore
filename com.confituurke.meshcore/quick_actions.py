@@ -74,8 +74,8 @@ def node_actions(activity, mgr, pk, chat=True):
     return out
 
 
-def node_menu(activity, mgr, pk):
-    """A node in the Nodes list."""
+def node_menu(activity, mgr, pk, discovered=False):
+    """A node in the contacts or the discovered list."""
     node = mgr.get_node(pk) or mgr.get_contact(pk) or {}
     title = ui_model.display(node.get("name")) or pk[:8]
     actions = node_actions(activity, mgr, pk)
@@ -85,6 +85,8 @@ def node_menu(activity, mgr, pk):
     else:
         actions.append(("Add to contacts", lambda: mgr.add_contact(pk, node.get("name"),
                                                                     node.get("type", 1))))
+    if discovered:
+        actions.append(("Remove from discovered", lambda: mgr.forget_node(pk), "danger"))
     return T.ActionSheet(title, actions, "%s · %s" % (
         {1: "companion", 2: "repeater", 3: "room server", 4: "sensor"}.get(node.get("type"),
                                                                           "node"), pk[:8].upper()))

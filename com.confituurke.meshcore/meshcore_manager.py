@@ -2762,6 +2762,39 @@ class MeshCoreManager:
         with."""
         return sorted(self._nodes.values(), key=lambda n: n.get("seq", 0), reverse=True)
 
+    def get_contact_nodes(self):
+        """The contacts, each with what was last heard of it as a node (name, SNR, hops,
+        when), most recently heard first; contacts never heard come last."""
+        out = []
+        for c in self._contacts.values():
+            n = self._nodes.get(c["pubkey"])
+            if n is not None:
+                merged = dict(c)
+                merged.update(n)
+                out.append(merged)
+            else:
+                out.append(dict(c))
+        out.sort(key=lambda n: n.get("seq", -1) if n.get("pubkey") in self._nodes else -1,
+                 reverse=True)
+        return out
+
+    def discovered_count(self):
+        """Nodes heard that are not contacts."""
+        return sum(1 for pk in self._nodes if pk not in self._contacts)
+
+    def forget_node(self, pubkey_hex):
+        """Drop a node from the discovered list (a contact stays a contact)."""
+        if self._nodes.pop(pubkey_hex, None) is not None:
+            self._nodes_dirty = True
+            self._notify("node", None)
+
+    def clear_discovered(self):
+        """Drop every heard node that is not a contact."""
+        for pk in [pk for pk in self._nodes if pk not in self._contacts]:
+            del self._nodes[pk]
+        self._nodes_dirty = True
+        self._notify("node", None)
+
     def add_contact(self, pubkey_hex, name=None, node_type=ADV_TYPE_CHAT):
         """Add a learned companion (or explicit pubkey) to the saved contact list."""
         if not pubkey_hex or len(pubkey_hex) != 64:

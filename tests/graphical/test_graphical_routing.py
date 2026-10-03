@@ -117,7 +117,7 @@ class TestRouting(unittest.TestCase):
         self.assertEqual(self.m.sound_override("Public"), "off")
 
     def test_long_press_in_the_node_list(self):
-        act = mc_fixtures.open_app(tab="Nodes")
+        act = mc_fixtures.open_app(tab="Contacts")
         act._tab.menu(mc_fixtures.GENT)
         sheet = act._tab.sheet
         self.assertIn("Details", sheet.rows)

@@ -19,11 +19,11 @@ class TestShell(unittest.TestCase):
         scr = lv.screen_active()
         self.assertEqual(scr.get_width(), 480)
         self.assertIsNotNone(find_label_with_text(scr, "Chats"))
-        self.assertTrue(click_label("Nodes"))
+        self.assertTrue(click_label("Contacts"))
         wait_for_render(10)
         act = mpos.ui.screen_stack[-1][0]
         self.assertEqual(act._tab_index, 1)
-        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Nodes"))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Contacts"))
 
     def test_first_run_starts_setup(self):
         mc_fixtures.fresh_manager(setup_done=False)
