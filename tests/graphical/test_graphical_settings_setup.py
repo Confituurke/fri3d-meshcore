@@ -195,5 +195,47 @@ class TestSoundSettings(unittest.TestCase):
         self.assertEqual(rec.names(), ["test_sound"])
 
 
+class TestContactAndReplySettings(unittest.TestCase):
+    def setUp(self):
+        self.m = mc_fixtures.fresh_manager()
+        ed = SharedPreferences(mc_fixtures.APP).edit()
+        ed.put_dict("auto_add", {})
+        ed.put_list("quick_replies", ["copy", "on my way", "ETA 10 min", "signal report"])
+        ed.commit()
+        self.m._auto_add_cache = None
+
+    def tearDown(self):
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+
+    def test_auto_add_switches(self):
+        act = mc_fixtures.open_app(tab=3)
+        sw = act._tab._auto["rptr"]
+        sw.add_state(lv.STATE.CHECKED)
+        sw.send_event(lv.EVENT.VALUE_CHANGED, None)
+        wait_for_render(5)
+        self.assertTrue(self.m.auto_add_settings()["rptr"])
+        self.assertFalse(self.m.auto_add_settings()["chat"])
+
+    def test_mention_sound_row(self):
+        act = mc_fixtures.open_app(tab=3)
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Mentions"))
+        self.assertTrue("mention" in act._tab._sound)
+
+    def test_edit_quick_replies_and_use_them(self):
+        mc_fixtures.open_app(tab=3)
+        self.assertTrue(click_label("Quick replies"))
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "QuickRepliesActivity")
+        page._fields[0].set_text("wilco")
+        page._fields[1].set_text("")
+        self.assertTrue(click_label("Save"))
+        wait_for_render(20)
+        self.assertEqual(self.m.quick_replies(), ["wilco", "ETA 10 min", "signal report"])
+        mc_fixtures.open_thread("channel", "Public")
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "wilco"))
+
+
 if __name__ == "__main__":
     unittest.main()

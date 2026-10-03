@@ -72,3 +72,22 @@ class AddChannelActivity(_FormActivity):
             self.finish()
         else:
             self._channel_msg.set_text(err or "could not add")
+
+
+class QuickRepliesActivity(_FormActivity):
+    title = "Quick replies"
+
+    def build(self):
+        current = self.mgr.quick_replies()
+        self._fields = []
+        for i in range(8):
+            ta = self.field("%d" % (i + 1), current[i] if i < len(current) else "", "")
+            ta.set_max_length(40)
+            self._fields.append(ta)
+        self._first = self._fields[0]
+        self.hint("Tap one above the message box to send it. Empty lines are left out.")
+        T.button(self.body, "Save", self.save, width=lv.pct(100))
+
+    def save(self):
+        self.mgr.set_quick_replies([f.get_text() for f in self._fields])
+        self.finish()

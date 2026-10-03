@@ -8,7 +8,8 @@ import mc_fixtures
 
 STATS = {"rx_on": True, "last_rx_s": 40, "noise_dbm": -106.0,
          "noise_series": [-106.0, -105.0, -107.0], "peak_rssi_30m": -74.0,
-         "packets_per_h": 6, "tx_air_pct": 0.1}
+         "packets_per_h": 6, "tx_air_pct": 0.1, "rx_per_min": 6.0,
+         "recent": [{"age_s": 30, "kind": "GRP", "rssi": -54, "snr": 10.25, "hops": 11}]}
 
 
 class TestRadio(unittest.TestCase):
@@ -51,6 +52,13 @@ class TestRadio(unittest.TestCase):
         act.select(0)
         wait_for_render(5)
         self.assertIsNone(radio._timer)
+
+
+    def test_recently_heard(self):
+        mc_fixtures.open_app(tab=2)
+        scr = lv.screen_active()
+        for text in ("Recently heard", "~6/min", "GRP", "11 hops"):
+            self.assertIsNotNone(find_label_with_text(scr, text), text)
 
 
 if __name__ == "__main__":

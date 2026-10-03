@@ -143,10 +143,21 @@ TUNES = {
     "channel": "channel:d=16,o=6,b=200:c,e",
     "dm": "direct:d=16,o=6,b=200:e,g,8c7",
     "advert": "advert:d=32,o=7,b=200:c",
+    "mention": "mention:d=16,o=7,b=200:c,p,c,p,c",
     "test": "test:d=8,o=6,b=180:c,e,g,4c7",
 }
 TUNE_GAP_MS = 3000          # at most one tune this often (a burst of packets gets one sound)
-SOUND_DEFAULTS = {"enabled": False, "channel": True, "dm": True, "advert": False}
+SOUND_DEFAULTS = {"enabled": False, "channel": True, "dm": True, "mention": True, "advert": False}
+DEFAULT_QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")
+MAX_QUICK_REPLIES = 8
+MAX_QUICK_REPLY_LEN = 40
+AUTO_ADD_DEFAULTS = {"chat": False, "rptr": False, "room": False, "sensor": False}
+RECENT_MAX = 20                 # packets kept for the Radio tab's "recently heard" list
+RX_RATE_WINDOW_MS = 10 * 60 * 1000
+_KIND_SHORT = {PAYLOAD_TYPE_GRP_TXT: "GRP", 0x06: "GRP", PAYLOAD_TYPE_ADVERT: "ADV",
+               PAYLOAD_TYPE_TXT_MSG: "TXT", PAYLOAD_TYPE_ACK: "ACK", PAYLOAD_TYPE_PATH: "PATH",
+               PAYLOAD_TYPE_REQ: "REQ", PAYLOAD_TYPE_RESPONSE: "RSP", PAYLOAD_TYPE_ANON_REQ: "ANON",
+               PAYLOAD_TYPE_TRACE: "TRACE", 0x0A: "MULTI", 0x0B: "CTL", 0x0F: "RAW"}
 
 
 class MeshCoreManager:
@@ -203,6 +214,8 @@ class MeshCoreManager:
         self._pending_order = []                 # ack_hex FIFO, to cap _pending_acks
         self._retries = []                       # unconfirmed sends awaiting an ack/echo
         self._sessions = {}                      # repeater/room pubkey -> login + results
+        self._heard_log = []                     # (ticks_ms, kind, rssi, snr, hops), newest first
+        self._heard_ms = []                      # receive times, last RX_RATE_WINDOW_MS
         self._repeater_heard = False             # heard a packet that travelled via a repeater
         self._recent = {}                        # (msg key) -> timestamp, to spot resends
         self._recent_order = []                  # key FIFO, to cap _recent
@@ -338,6 +351,12 @@ class MeshCoreManager:
             "tx_air_pct": round(tx_ms * 100.0 / elapsed, 1),
             "last_rx_s": None if self._last_rx_ms is None else tdiff(now, self._last_rx_ms) // 1000,
             "rx_on": bool(self._radio_ready),
+            "recent": [{"age_s": tdiff(now, t) // 1000, "kind": k, "rssi": r, "snr": q, "hops": h}
+                       for t, k, r, q, h in self._heard_log],
+            "rx_per_min": round(len([t for t in self._heard_ms
+                                     if tdiff(now, t) <= RX_RATE_WINDOW_MS]) * 60000.0
+                                / min(max(tdiff(now, self._stats_start_ms), 60000),
+                                      RX_RATE_WINDOW_MS), 1),
         }
 
     # --- radio preset ------------------------------------------------------- #
@@ -1267,6 +1286,13 @@ class MeshCoreManager:
             return
         if h is not None and not self._remember(h):
             return
+        now = self._now_ms()
+        self._heard_log.insert(0, (now, _KIND_SHORT.get(pkt.payload_type, "?"), rssi, snr,
+                                self._hops(pkt)))
+        del self._heard_log[RECENT_MAX:]
+        self._heard_ms.append(now)
+        while self._heard_ms and tdiff(now, self._heard_ms[0]) > RX_RATE_WINDOW_MS:
+            self._heard_ms.pop(0)
         if pkt.path_hash_count():   # this copy travelled through at least one repeater
             self._repeater_heard = True
 
@@ -1383,6 +1409,7 @@ class MeshCoreManager:
             "" if node.get("verified") else " [UNVERIFIED]"))
         self._notify("node", node)
         self._chime("advert")
+        self._auto_add(node)
 
     def _evict_oldest_node(self):
         """Drop the least-recently-heard learned companion to bound RAM. Contacts keep their
@@ -1420,7 +1447,7 @@ class MeshCoreManager:
         self._add_message(decoded["channel"], msg)
         self._bump_unread(decoded["channel"], mention=self._mentions_us(msg["text"]))
         self._notify("message", (decoded["channel"], msg))
-        self._chime("channel")
+        self._chime("mention" if self._mentions_us(msg["text"]) else "channel")
         self._post_notification(decoded["channel"], msg)
         return True
 
@@ -1796,6 +1823,76 @@ class MeshCoreManager:
         self._notify("dm", (pub_hex, msg))
         return True
 
+    # --- quick replies and auto-add ----------------------------------------- #
+    def quick_replies(self):
+        # An explicit default: MicroPythonOS answers [] for a missing list key, which would
+        # read as "the user removed every reply".
+        unset = ["\x00unset"]
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS).get_list("quick_replies", unset)
+        except Exception:
+            saved = unset
+        if not isinstance(saved, list) or saved == unset:
+            return list(DEFAULT_QUICK_REPLIES)
+        return [str(t) for t in saved]
+
+    def set_quick_replies(self, texts):
+        """Keep the non-empty ones (trimmed, at most MAX_QUICK_REPLY_LEN characters), at most
+        MAX_QUICK_REPLIES of them."""
+        clean = []
+        for t in texts or ():
+            t = (t or "").strip()[:MAX_QUICK_REPLY_LEN]
+            if t:
+                clean.append(t)
+        clean = clean[:MAX_QUICK_REPLIES]
+        try:
+            ed = self._editor()
+            ed.put_list("quick_replies", clean)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: quick replies error:", repr(e))
+        return clean
+
+    def auto_add_settings(self):
+        """{chat, rptr, room, sensor}: node types added to the contacts when their advert
+        is heard."""
+        out = dict(AUTO_ADD_DEFAULTS)
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS).get_dict("auto_add", {}) or {}
+            for k in out:
+                if k in saved:
+                    out[k] = bool(saved[k])
+        except Exception:
+            pass
+        return out
+
+    def set_auto_add(self, **changes):
+        cur = self.auto_add_settings()
+        for k, v in changes.items():
+            if k in cur:
+                cur[k] = bool(v)
+        try:
+            ed = self._editor()
+            ed.put_dict("auto_add", cur)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: auto-add error:", repr(e))
+        self._auto_add_cache = cur
+        return cur
+
+    def _auto_add(self, node):
+        pk = node.get("pubkey")
+        if not pk or pk in self._contacts:
+            return
+        cfg = getattr(self, "_auto_add_cache", None)
+        if cfg is None:
+            cfg = self._auto_add_cache = self.auto_add_settings()
+        kind = {1: "chat", 2: "rptr", 3: "room", 4: "sensor"}.get(node.get("type"))
+        if kind and cfg.get(kind):
+            self.add_contact(pk, node.get("name"), node.get("type"))
+
     # --- buzzer ------------------------------------------------------------ #
     def sound_settings(self):
         """{enabled, channel, dm, advert}: whether the buzzer sounds, and for what."""
@@ -1830,6 +1927,8 @@ class MeshCoreManager:
         cfg = getattr(self, "_sound_cache", None)
         if cfg is None:
             cfg = self._sound_cache = self.sound_settings()
+        if kind == "mention" and not cfg.get("mention"):
+            kind = "channel"          # a mention is still a channel message
         if not cfg["enabled"] or not cfg.get(kind):
             return
         now = self._now_ms()

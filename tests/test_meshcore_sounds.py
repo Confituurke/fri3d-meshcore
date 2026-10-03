@@ -49,7 +49,7 @@ def _dm(env, m, text, ts=1790000000):
 
 def test_off_by_default():
     env, m, played = _setup()
-    _assert(m.sound_settings() == {"enabled": False, "channel": True, "dm": True, "advert": False},
+    _assert(m.sound_settings() == {"enabled": False, "channel": True, "dm": True, "mention": True, "advert": False},
             m.sound_settings())
     m._ingest(_group("Sam", "hi", 1790000000), rssi=-90, snr=4)
     _assert(played == [], played)
@@ -59,7 +59,7 @@ def test_settings_persist():
     env, m, played = _setup()
     m.set_sound_settings(enabled=True, advert=True, channel=False)
     m2 = fake_mpos.new_manager(env)
-    _assert(m2.sound_settings() == {"enabled": True, "channel": False, "dm": True, "advert": True},
+    _assert(m2.sound_settings() == {"enabled": True, "channel": False, "dm": True, "mention": True, "advert": True},
             m2.sound_settings())
 
 

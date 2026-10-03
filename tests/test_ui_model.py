@@ -314,5 +314,16 @@ def test_chats_leave_repeaters_out_and_show_rooms():
             [r["title"] for r in ui.chat_rows(m, NOW, "direct")] == ["Gent BBS", "Alex"])
 
 
+def test_recently_heard_rows():
+    ui = _ui()
+    rows = ui.recent_rows([{"age_s": 30, "kind": "GRP", "rssi": -54, "snr": 10.25, "hops": 11},
+                           {"age_s": 125, "kind": "ADV", "rssi": -66, "snr": -2.0, "hops": 0},
+                           {"age_s": 4000, "kind": "TXT", "rssi": None, "snr": None, "hops": 1}])
+    _assert(rows == [("now", "GRP", "\u221254 dBm", "10.2", "11 hops"),
+                     ("2m", "ADV", "\u221266 dBm", "\u22122.0", "direct"),
+                     ("1h", "TXT", "\u2014", "\u2014", "1 hop")], rows)
+    _assert(ui.rx_rate_text(6.0) == "~6/min" and ui.rx_rate_text(0.4) == "~0.4/min")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

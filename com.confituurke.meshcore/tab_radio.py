@@ -69,6 +69,11 @@ class RadioTab(Tab):
         T.label(text, air, 14, col=T.MUTED)
         T.button(preset, "Change", self.change_preset, "filled", 44, size=16)
 
+        heard = T.row(body, lv.pct(100), 24, 8)
+        T.label(heard, "Recently heard", 15, col=T.MUTED).set_flex_grow(1)
+        self.rate = T.label(heard, "", 13, mono=True, col=T.MUTED)
+        self.heard = T.column(body, lv.pct(100), lv.SIZE_CONTENT, 2)
+
         self._timer = lv.timer_create(lambda t: self.refresh(), REFRESH_MS, None)
         self.refresh()
 
@@ -125,11 +130,28 @@ class RadioTab(Tab):
         for (name, value), (n, v) in zip(self._stats, t["stats"]):
             name.set_text(n)
             value.set_text(v)
+        self.rate.set_text(ui_model.rx_rate_text(st.get("rx_per_min", 0)))
+        self._fill_heard(st.get("recent") or [])
         series = st.get("noise_series") or []
         self.chart.set_all_values(self.series, lv.CHART_POINT_NONE)
         for v in series[-CHART_POINTS:]:
             self.chart.set_next_value(self.series, int(v))
         self.chart.refresh()
+
+    _COLS = (44, 56, 86, 52)     # age, kind, RSSI, SNR; hops takes the rest
+
+    def _fill_heard(self, recent):
+        self.heard.clean()
+        rows = ui_model.recent_rows(recent[:8])
+        if not rows:
+            T.label(self.heard, "Nothing heard yet.", 15, col=T.MUTED)
+            return
+        for cells in rows:
+            line = T.row(self.heard, lv.pct(100), 20, 0)
+            for i, text in enumerate(cells):
+                lb = T.label(line, text, 13, mono=True, col=T.ACCENT if i == 1 else T.TEXT)
+                if i < len(self._COLS):
+                    lb.set_width(self._COLS[i])
 
     def destroy(self):
         if self._timer is not None:

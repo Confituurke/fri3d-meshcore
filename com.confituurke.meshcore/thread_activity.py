@@ -141,7 +141,7 @@ class ThreadActivity(Activity):
 
     def _build_quick_replies(self, scr):
         self.quick = T.chip_bar(scr, 8)
-        for text in ui_model.QUICK_REPLIES:
+        for text in self.mgr.quick_replies():
             T.quick_chip(self.quick, text, lambda t=text: self._quick(t))
 
     def _build_composer(self, scr):

@@ -452,3 +452,21 @@ def login_line(session):
     if state == "failed":
         return (session.get("error") or "Login failed", FAIL_TEXT)
     return ("Not logged in", MUTED)
+
+
+def recent_rows(recent):
+    """Rows for the Radio tab's "recently heard": (age, kind, RSSI, SNR, hops)."""
+    out = []
+    for r in recent:
+        a = r["age_s"]
+        age = "now" if a < 60 else ("%dm" % (a // 60) if a < 3600 else "%dh" % (a // 3600))
+        rssi = _minus("%d" % r["rssi"]) + " dBm" if r.get("rssi") is not None else "\u2014"
+        snr = snr_text(r["snr"]) if r.get("snr") is not None else "\u2014"
+        h = r.get("hops") or 0
+        hops = "direct" if h == 0 else ("1 hop" if h == 1 else "%d hops" % h)
+        out.append((age, r["kind"], rssi, snr, hops))
+    return out
+
+
+def rx_rate_text(per_min):
+    return "~%d/min" % per_min if per_min >= 1 else "~%.1f/min" % per_min

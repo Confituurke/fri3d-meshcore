@@ -83,7 +83,9 @@ class FakeEnv:
                 return self._get(k, default, bool)
 
             def get_list(self, k, default=None):
-                return self._get(k, default, list)
+                # MicroPythonOS returns [] for a missing key when no default is given
+                got = self._get(k, default, list)
+                return [] if got is None else got
 
             def get_dict(self, k, default=None):
                 return self._get(k, default, dict)

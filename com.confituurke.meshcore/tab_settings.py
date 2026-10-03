@@ -44,6 +44,24 @@ class SettingsTab(Tab):
         T.section_label(body, "Sounds")
         self._build_sounds(body)
 
+        T.section_label(body, "Messages")
+        card = self._card(body)
+        T.SettingRow(card, "Quick replies", None,
+                     lambda: self._open(settings_pages.QuickRepliesActivity), first=True)
+
+        T.section_label(body, "Auto-add contacts")
+        card = self._card(body)
+        auto = self.mgr.auto_add_settings()
+        self._auto = {}
+        for i, (key, text) in enumerate(self._AUTO):
+            row = T.row(card, lv.pct(100), 52, 8)
+            if i:
+                T.divider(row, lv.BORDER_SIDE.TOP)
+            T.label(row, text, 16).set_flex_grow(1)
+            self._auto[key] = T.switch(row, auto[key], lambda v, k=key: self.mgr.set_auto_add(**{k: v}))
+        T.label(body, "Nodes of the switched-on kinds become contacts when their advert is heard.",
+                13, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+
         T.section_label(body, "Channels")
         self._channels = self._card(body)
         self._fill_channels()
@@ -54,7 +72,9 @@ class SettingsTab(Tab):
         T.label(body, "MeshCore is a trademark of its owner.", 13, col=T.MUTED)
 
     _KINDS = (("channel", "Channel messages"), ("dm", "Direct messages"),
-              ("advert", "Adverts heard"))
+              ("mention", "Mentions"), ("advert", "Adverts heard"))
+    _AUTO = (("chat", "Companions"), ("rptr", "Repeaters"), ("room", "Room servers"),
+             ("sensor", "Sensors"))
 
     def _build_sounds(self, body):
         cfg = self.mgr.sound_settings()
