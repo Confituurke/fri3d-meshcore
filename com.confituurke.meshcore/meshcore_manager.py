@@ -138,6 +138,17 @@ MESHCORE_APP = "com.confituurke.meshcore"
 NICKNAME_PREFS = MESHCORE_APP
 
 
+# Buzzer tunes (RTTTL), one per kind of traffic, short so they never overlap the next one.
+TUNES = {
+    "channel": "channel:d=16,o=6,b=200:c,e",
+    "dm": "direct:d=16,o=6,b=200:e,g,8c7",
+    "advert": "advert:d=32,o=7,b=200:c",
+    "test": "test:d=8,o=6,b=180:c,e,g,4c7",
+}
+TUNE_GAP_MS = 3000          # at most one tune this often (a burst of packets gets one sound)
+SOUND_DEFAULTS = {"enabled": False, "channel": True, "dm": True, "advert": False}
+
+
 class MeshCoreManager:
 
     _instance = None
@@ -1371,6 +1382,7 @@ class MeshCoreManager:
             node.get("type_name"), node.get("name") or "?", node.get("id"), meta,
             "" if node.get("verified") else " [UNVERIFIED]"))
         self._notify("node", node)
+        self._chime("advert")
 
     def _evict_oldest_node(self):
         """Drop the least-recently-heard learned companion to bound RAM. Contacts keep their
@@ -1408,6 +1420,7 @@ class MeshCoreManager:
         self._add_message(decoded["channel"], msg)
         self._bump_unread(decoded["channel"], mention=self._mentions_us(msg["text"]))
         self._notify("message", (decoded["channel"], msg))
+        self._chime("channel")
         self._post_notification(decoded["channel"], msg)
         return True
 
@@ -1497,6 +1510,7 @@ class MeshCoreManager:
         else:
             print("MeshCore DM <%s>: %s  (%s)" % (name, msg["text"], meta))
             self._add_dm(pub_hex, msg)
+            self._chime("dm")
             self._bump_unread(pub_hex)
             self._notify("dm", (pub_hex, msg))
             self._post_dm_notification(pub_hex, name, msg)
@@ -1782,6 +1796,71 @@ class MeshCoreManager:
         self._notify("dm", (pub_hex, msg))
         return True
 
+    # --- buzzer ------------------------------------------------------------ #
+    def sound_settings(self):
+        """{enabled, channel, dm, advert}: whether the buzzer sounds, and for what."""
+        out = dict(SOUND_DEFAULTS)
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS).get_dict("sound", {}) or {}
+            for k in out:
+                if k in saved:
+                    out[k] = bool(saved[k])
+        except Exception:
+            pass
+        return out
+
+    def set_sound_settings(self, **changes):
+        cur = self.sound_settings()
+        for k, v in changes.items():
+            if k in cur:
+                cur[k] = bool(v)
+        try:
+            ed = self._editor()
+            ed.put_dict("sound", cur)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: sound settings error:", repr(e))
+        self._sound_cache = cur
+        return cur
+
+    def _chime(self, kind):
+        """Sound the buzzer for an incoming channel message, direct message or advert, if
+        the settings ask for it and no tune sounded in the last TUNE_GAP_MS."""
+        cfg = getattr(self, "_sound_cache", None)
+        if cfg is None:
+            cfg = self._sound_cache = self.sound_settings()
+        if not cfg["enabled"] or not cfg.get(kind):
+            return
+        now = self._now_ms()
+        last = getattr(self, "_last_tune_ms", None)
+        if last is not None and tdiff(now, last) < TUNE_GAP_MS:
+            return
+        self._last_tune_ms = now
+        try:
+            self._play_tune(kind)
+        except Exception as e:
+            print("MeshCore: buzzer error:", repr(e))
+
+    def has_buzzer(self):
+        try:
+            from mpos import AudioManager
+            return AudioManager.find_output_by_kind("buzzer") is not None
+        except Exception:
+            return False
+
+    def _play_tune(self, kind):
+        """Play TUNES[kind] on the device's buzzer output (no-op without one)."""
+        from mpos import AudioManager
+        out = AudioManager.find_output_by_kind("buzzer")
+        if out is None:
+            return
+        AudioManager.player(rtttl=TUNES[kind], output=out,
+                            stream_type=AudioManager.STREAM_NOTIFICATION).start()
+
+    def test_sound(self):
+        self._play_tune("test")
+
     # --- repeaters and room servers ---------------------------------------- #
     def server_session(self, pubkey_hex):
         """Login state and latest results for a repeater or room server:
@@ -2007,6 +2086,7 @@ class MeshCoreManager:
                "incoming": True, "author": prefix}
         if not self._dup_message(("room", room_hex, prefix, text), msg["ts"]):
             self._add_dm(room_hex, msg)
+            self._chime("dm")
             self._bump_unread(room_hex)
             self._notify("dm", (room_hex, msg))
             self._post_dm_notification(room_hex, contact.get("name") or room_hex[:8], msg)

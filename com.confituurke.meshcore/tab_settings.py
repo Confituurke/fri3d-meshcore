@@ -41,6 +41,9 @@ class SettingsTab(Tab):
         T.label(row, "Receive in background", 16).set_flex_grow(1)
         self._service = T.switch(row, self.mgr.is_service_enabled(), self.mgr.set_service_enabled)
 
+        T.section_label(body, "Sounds")
+        self._build_sounds(body)
+
         T.section_label(body, "Channels")
         self._channels = self._card(body)
         self._fill_channels()
@@ -49,6 +52,54 @@ class SettingsTab(Tab):
         card = self._card(body)
         T.SettingRow(card, "Version", VERSION, first=True)
         T.label(body, "MeshCore is a trademark of its owner.", 13, col=T.MUTED)
+
+    _KINDS = (("channel", "Channel messages"), ("dm", "Direct messages"),
+              ("advert", "Adverts heard"))
+
+    def _build_sounds(self, body):
+        cfg = self.mgr.sound_settings()
+        card = self._card(body)
+        self._sound = {}
+        row = T.row(card, lv.pct(100), 52, 8)
+        T.label(row, "Buzzer", 16).set_flex_grow(1)
+        self._sound["enabled"] = T.switch(row, cfg["enabled"], self._set_enabled)
+        self._sound_rows = T.column(card, lv.pct(100), lv.SIZE_CONTENT, 0)
+        for key, text in (("all", "All"),) + self._KINDS:
+            row = T.row(self._sound_rows, lv.pct(100), 52, 8)
+            T.divider(row, lv.BORDER_SIDE.TOP)
+            T.label(row, text, 16).set_flex_grow(1)
+            on = all(cfg[k] for k, _ in self._KINDS) if key == "all" else cfg[key]
+            self._sound[key] = T.switch(row, on, lambda v, k=key: self._set_kind(k, v))
+        T.SettingRow(self._sound_rows, "Play a test sound", None, self.mgr.test_sound, chevron=False)
+        if not self.mgr.has_buzzer():
+            T.label(self._sound_rows, "This device has no buzzer the app can use.", 13, col=T.MUTED)
+        self._show_sound_rows(cfg["enabled"])
+
+    def _show_sound_rows(self, on):
+        if on:
+            self._sound_rows.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self._sound_rows.add_flag(lv.obj.FLAG.HIDDEN)
+
+    def _set_enabled(self, on):
+        self.mgr.set_sound_settings(enabled=on)
+        self._show_sound_rows(on)
+
+    def _set_kind(self, key, on):
+        if key == "all":
+            cfg = self.mgr.set_sound_settings(**{k: on for k, _ in self._KINDS})
+        else:
+            cfg = self.mgr.set_sound_settings(**{key: on})
+        for k, _ in self._KINDS:
+            self._check(self._sound[k], cfg[k])
+        self._check(self._sound["all"], all(cfg[k] for k, _ in self._KINDS))
+
+    @staticmethod
+    def _check(sw, on):
+        if on:
+            sw.add_state(lv.STATE.CHECKED)
+        else:
+            sw.remove_state(lv.STATE.CHECKED)
 
     def _card(self, parent):
         return T.card(parent, filled=False, pad_ver=0, pad_hor=14, gap=0)

@@ -139,5 +139,61 @@ class TestSettings(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), pub.hex()[:8].upper()))
 
 
+class TestSoundSettings(unittest.TestCase):
+    def setUp(self):
+        self.m = mc_fixtures.fresh_manager()
+        ed = SharedPreferences(mc_fixtures.APP).edit()
+        ed.put_dict("sound", {})
+        ed.commit()
+        self.m._sound_cache = None
+
+    def tearDown(self):
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+
+    def _flip(self, sw, on):
+        if on:
+            sw.add_state(lv.STATE.CHECKED)
+        else:
+            sw.remove_state(lv.STATE.CHECKED)
+        sw.send_event(lv.EVENT.VALUE_CHANGED, None)
+        wait_for_render(5)
+
+    def test_buzzer_switch_shows_the_choices(self):
+        act = mc_fixtures.open_app(tab=3)
+        tab = act._tab
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Buzzer"))
+        self.assertTrue(tab._sound_rows.has_flag(lv.obj.FLAG.HIDDEN))
+        self._flip(tab._sound["enabled"], True)
+        self.assertTrue(self.m.sound_settings()["enabled"])
+        self.assertFalse(tab._sound_rows.has_flag(lv.obj.FLAG.HIDDEN))
+        for text in ("All", "Channel messages", "Direct messages", "Adverts heard"):
+            self.assertIsNotNone(find_label_with_text(lv.screen_active(), text), text)
+
+    def test_choose_kinds_and_all(self):
+        act = mc_fixtures.open_app(tab=3)
+        tab = act._tab
+        self._flip(tab._sound["enabled"], True)
+        self._flip(tab._sound["advert"], True)
+        self.assertTrue(self.m.sound_settings()["advert"])
+        self.assertTrue(tab._sound["all"].has_state(lv.STATE.CHECKED))
+        self._flip(tab._sound["channel"], False)
+        self.assertFalse(tab._sound["all"].has_state(lv.STATE.CHECKED))
+        self._flip(tab._sound["all"], True)
+        st = self.m.sound_settings()
+        self.assertTrue(st["channel"] and st["dm"] and st["advert"], st)
+        self._flip(tab._sound["all"], False)
+        st = self.m.sound_settings()
+        self.assertFalse(st["channel"] or st["dm"] or st["advert"], st)
+
+    def test_test_sound(self):
+        rec = mc_fixtures.Recorder(self.m, "test_sound")
+        act = mc_fixtures.open_app(tab=3)
+        self._flip(act._tab._sound["enabled"], True)
+        self.assertTrue(click_label("Play a test sound"))
+        wait_for_render(5)
+        self.assertEqual(rec.names(), ["test_sound"])
+
+
 if __name__ == "__main__":
     unittest.main()
