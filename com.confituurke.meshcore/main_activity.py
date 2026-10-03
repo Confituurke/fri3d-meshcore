@@ -39,14 +39,36 @@ class MeshCoreHome(Activity):
             return
         if not self.mgr.is_running():
             self.mgr.start()           # listen while the app is open
+        T.apply()                      # MicroPythonOS's look, or the app's own choice
         scr = T.make_screen()
-        self.content = T.column(scr, T.W, 1)
-        self.content.set_flex_grow(1)
-        self.tabbar = T.TabBar(scr, self.TABS, self.select)
+        self.scr = scr
         extras = self.getIntent().extras if self.getIntent() else None
         start = (extras or {}).get("tab", 0) if isinstance(extras, dict) else 0
-        self.select(start)
+        self._build(start)
         self.setContentView(scr)
+
+    def _build(self, tab):
+        self._theme = T.theme_version
+        self.content = T.column(self.scr, T.W, 1)
+        self.content.set_flex_grow(1)
+        self.tabbar = T.TabBar(self.scr, self.TABS, self.select)
+        self._tab = None
+        self._tab_index = -1
+        self.select(tab)
+
+    def rebuild(self):
+        """The colours changed (the OS's look or the app's Appearance setting): build the
+        screen again in them, on the same tab."""
+        tab = max(0, self._tab_index)
+        if self._tab is not None:
+            try:
+                self._tab.destroy()
+            except Exception as e:
+                print("MeshCoreHome: tab destroy error:", repr(e))
+        self.scr.clean()
+        T.fill(self.scr, T.BG)
+        self.scr.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
+        self._build(tab)
 
     def select(self, idx):
         if idx == self._tab_index:
@@ -78,6 +100,8 @@ class MeshCoreHome(Activity):
 
     def onResume(self, screen):
         super().onResume(screen)
+        if self._tab is not None and (T.apply() or self._theme != T.theme_version):
+            self.rebuild()
         self.mgr.add_subscriber(self._on_event)
         # Events while another screen was on top were not seen here.
         self.refresh_badge()

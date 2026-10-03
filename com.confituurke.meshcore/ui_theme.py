@@ -16,7 +16,12 @@ import ui_model
 
 from ui_model import (BG, SURFACE, SURFACE2, LINE, OUTLINE, TEXT, MUTED, ACCENT,  # noqa: F401
                       OWN, OWN_TEXT, BAR, CHAN_BG, CHAN_FG, DM_BG, DM_FG, ROOM_BG,
-                      DELIVERED, FAIL, FAIL_TEXT, OK, WARN, ERR)
+                      DELIVERED, FAIL, FAIL_TEXT, OK, WARN, ERR, ON_ACCENT, KEYBOARD,
+                      PIN_RPTR, PIN_ROOM, SENDER_COLORS)
+import ui_palette
+
+palette = None          # the colours in use (ui_palette.resolve); None until apply()
+theme_version = 0       # bumped by each apply() that changes the colours
 
 W = 480
 H = 480
@@ -57,6 +62,60 @@ _styles = {}
 
 def color(c):
     return lv.color_hex(c)
+
+
+# --- theme ------------------------------------------------------------------ #
+
+def _os_look():
+    """(light mode?, primary colour as 0xRRGGBB or None) from MicroPythonOS."""
+    try:
+        from mpos import AppearanceManager
+        light = bool(AppearanceManager.is_light_mode())
+        c = AppearanceManager.get_primary_color()
+    except Exception:
+        return False, None
+    if c is None:
+        return light, None
+    try:
+        return light, rgb(c)
+    except Exception:
+        return light, None
+
+
+def rgb(c):
+    """An lv.color_t as 0xRRGGBB."""
+    return (c.red << 16) | (c.green << 8) | c.blue
+
+
+def wanted_palette():
+    """The colours the settings ask for now: the app's own Appearance choice, or the OS's."""
+    from mpos import SharedPreferences
+    from meshcore_manager import MESHCORE_APP
+    prefs = SharedPreferences(MESHCORE_APP)
+    light, accent = _os_look()
+    return ui_palette.resolve(prefs.get_string("theme", "system") or "system",
+                              prefs.get_string("accent", "system") or "system", light, accent)
+
+
+def apply(p=None):
+    """Use palette `p` (default: wanted_palette()) for everything built from now on. True when
+    the colours changed: screens already built then have to be rebuilt."""
+    global palette, theme_version
+    if p is None:
+        p = wanted_palette()
+    if palette is not None and all(palette.get(k) == v for k, v in p.items()):
+        return False
+    p = dict(p)
+    p["ERR"] = p["FAIL_TEXT"]
+    g = globals()
+    for k, v in p.items():
+        if k.isupper():
+            g[k] = v
+            setattr(ui_model, k, v)
+    _styles.clear()             # cached styles hold the old colours
+    palette = p
+    theme_version += 1
+    return True
 
 
 def font(size, weight=400, mono=False, emoji=False):
@@ -137,12 +196,12 @@ def divider(o, side=None):
     return o
 
 
-def label(parent, text, size=16, weight=400, col=TEXT, mono=False, long_mode=None, width=None,
+def label(parent, text, size=16, weight=400, col=None, mono=False, long_mode=None, width=None,
           emoji=False):
     lb = lv.label(parent)
     lb.set_text(text)
     lb.set_style_text_font(font(size, weight, mono, emoji), lv.PART.MAIN)
-    lb.set_style_text_color(color(col), lv.PART.MAIN)
+    lb.set_style_text_color(color(TEXT if col is None else col), lv.PART.MAIN)
     if long_mode is not None:
         lb.set_long_mode(long_mode)
     if width is not None:
@@ -150,10 +209,10 @@ def label(parent, text, size=16, weight=400, col=TEXT, mono=False, long_mode=Non
     return lb
 
 
-def icon(parent, name, col=TEXT):
+def icon(parent, name, col=None):
     img = lv.image(parent)
     img.set_src("M:%s/icons/%s.png" % (_DIR, name))
-    tint(img, col)
+    tint(img, TEXT if col is None else col)
     return img
 
 
@@ -162,11 +221,11 @@ def tint(img, col):
     img.set_style_image_recolor_opa(lv.OPA.COVER, lv.PART.MAIN)
 
 
-def symbol(parent, sym, col=TEXT):
+def symbol(parent, sym, col=None):
     lb = lv.label(parent)
     lb.set_text(sym)
     lb.set_style_text_font(SYMBOL_FONT, lv.PART.MAIN)
-    lb.set_style_text_color(color(col), lv.PART.MAIN)
+    lb.set_style_text_color(color(TEXT if col is None else col), lv.PART.MAIN)
     return lb
 
 
@@ -190,6 +249,8 @@ def clickable(obj, on_click, feedback=True):
 
 
 def make_screen():
+    if palette is None:
+        apply()                 # first screen of the app (a notification can open any)
     scr = lv.obj()
     scr.remove_style_all()
     fill(scr, BG)
@@ -212,7 +273,7 @@ def scroll_area(parent, pad_hor=0, gap=0):
     return a
 
 
-def icon_button(parent, name, on_click, w=48, h=48, col=TEXT):
+def icon_button(parent, name, on_click, w=48, h=48, col=None):
     b = box(parent, w, h)
     b.set_style_radius(h // 2, lv.PART.MAIN)
     icon(b, name, col).center()
@@ -324,10 +385,10 @@ class Chip:
         self.obj.set_style_bg_color(color(ACCENT if on else SURFACE), lv.PART.MAIN)
         if self.label is not None:
             self.obj.set_style_pad_hor(self.pad_on if on else self.pad_off, lv.PART.MAIN)
-            self.label.set_style_text_color(color(BG if on else TEXT), lv.PART.MAIN)
+            self.label.set_style_text_color(color(ON_ACCENT if on else TEXT), lv.PART.MAIN)
             self.label.set_style_text_font(font(16, 600 if on else 400), lv.PART.MAIN)
         if self.icon is not None:
-            tint(self.icon, BG if on else TEXT)
+            tint(self.icon, ON_ACCENT if on else TEXT)
 
 
 def chip_bar(parent, gap=8):
@@ -355,7 +416,7 @@ class Badge:
         self.obj = row(parent, lv.SIZE_CONTENT, 24, 0, lv.FLEX_ALIGN.CENTER)
         self.obj.set_style_radius(12, lv.PART.MAIN)
         self.obj.set_style_min_width(24, lv.PART.MAIN)
-        self.label = label(self.obj, "", 14, 700, BG)
+        self.label = label(self.obj, "", 14, 700, ON_ACCENT)
 
     def show(self, count=0, mention=False):
         if mention:
@@ -369,7 +430,7 @@ class Badge:
             self.obj.set_style_border_width(0, lv.PART.MAIN)
             self.obj.set_style_pad_hor(7, lv.PART.MAIN)
             self.label.set_text(str(count))
-            self.label.set_style_text_color(color(BG), lv.PART.MAIN)
+            self.label.set_style_text_color(color(ON_ACCENT), lv.PART.MAIN)
         if mention or count:
             self.obj.remove_flag(lv.obj.FLAG.HIDDEN)
         else:
@@ -531,7 +592,7 @@ def button(parent, text, on_click, kind="primary", h=52, sub=None, width=None, s
     radius = 12 if h >= 52 else (10 if h >= 44 else 8)
     if kind == "primary":
         fill(b, ACCENT, radius)
-        fg, sub_fg, weight = BG, BG, 700 if h >= 52 else 600
+        fg, sub_fg, weight = ON_ACCENT, ON_ACCENT, 700 if h >= 52 else 600
     elif kind == "tile":
         fill(b, SURFACE, 10, OUTLINE)
         fg, sub_fg, weight = TEXT, MUTED, 400
@@ -697,7 +758,7 @@ def dropdown(parent, options, selected=0):
         lst.set_style_text_color(color(TEXT), lv.PART.MAIN)
         fill(lst, SURFACE, 10, OUTLINE)
         lst.set_style_bg_color(color(ACCENT), lv.PART.SELECTED | lv.STATE.CHECKED)
-        lst.set_style_text_color(color(BG), lv.PART.SELECTED | lv.STATE.CHECKED)
+        lst.set_style_text_color(color(ON_ACCENT), lv.PART.SELECTED | lv.STATE.CHECKED)
     return dd
 
 
@@ -719,7 +780,7 @@ def keyboard(scr, ta=None, on_show=None, on_hide=None, floating=False):
 
 def style_keyboard(kb):
     """The canvas keyboard colours on MicroPythonOS's keyboard."""
-    kb.set_style_bg_color(color(0x0A0E13), lv.PART.MAIN)
+    kb.set_style_bg_color(color(KEYBOARD), lv.PART.MAIN)
     kb.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
     kb.set_style_border_width(0, lv.PART.MAIN)
     kb.set_style_pad_all(4, lv.PART.MAIN)

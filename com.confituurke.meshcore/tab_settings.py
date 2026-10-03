@@ -41,6 +41,12 @@ class SettingsTab(Tab):
         T.label(row, "Receive in background", 16).set_flex_grow(1)
         self._service = T.switch(row, self.mgr.is_service_enabled(), self.mgr.set_service_enabled)
 
+        T.section_label(body, "Appearance")
+        card = self._card(body)
+        self._look_row = T.SettingRow(card, "Theme and colour", settings_pages.appearance_text(),
+                                      lambda: self._open(settings_pages.AppearanceActivity),
+                                      first=True)
+
         T.section_label(body, "Location")
         card = self._card(body)
         self._location_row = T.SettingRow(card, "My position", self._location_text(),
@@ -171,6 +177,7 @@ class SettingsTab(Tab):
         self._name_row.value.set_text(self.mgr.nickname())
         self._preset_row.value.set_text(self._preset_text())
         self._location_row.value.set_text(self._location_text())
+        self._look_row.value.set_text(settings_pages.appearance_text())
         self._fill_channels()
 
     def on_event(self, event, data):

@@ -157,7 +157,7 @@ class ThreadActivity(Activity):
         self._send = T.box(bar, 44, 44)
         T.fill(self._send, T.ACCENT, 22)
         self._send.set_style_bg_opa(lv.OPA._40, lv.PART.MAIN | lv.STATE.DISABLED)
-        T.icon(self._send, "send", T.BG).center()
+        T.icon(self._send, "send", T.ON_ACCENT).center()
         T.clickable(self._send, self._send_typed, feedback=False)
         self._update_counter()
 

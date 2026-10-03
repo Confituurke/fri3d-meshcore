@@ -24,8 +24,10 @@ ME_ZOOM = 15
 LABEL_ZOOM = 13                 # names next to the pins from this zoom on
 TAP_PX = 28
 DRAG_PX = 8
-PIN_COLORS = {"chat": T.ACCENT, "rptr": 0x6CB4FF, "room": 0x9BE0A8, "sensor": T.MUTED,
-              "other": T.MUTED}
+
+
+def pin_color(kind):
+    return {"chat": T.ACCENT, "rptr": T.PIN_RPTR, "room": T.PIN_ROOM}.get(kind, T.MUTED)
 
 
 def _read_file(path):
@@ -276,7 +278,7 @@ class MapView:
             pk = p["pubkey"]
             keep.add(pk)
             dot, name = self._pins.get(pk) or self._new_pin(pk)
-            T.fill(dot, PIN_COLORS.get(p["kind"], T.MUTED), PIN // 2, T.BG, 2)
+            T.fill(dot, pin_color(p["kind"]), PIN // 2, T.BG, 2)
             dot.set_pos(int(p["sx"]) - PIN // 2, int(p["sy"]) - PIN // 2)
             dot.remove_flag(lv.obj.FLAG.HIDDEN)
             if names:

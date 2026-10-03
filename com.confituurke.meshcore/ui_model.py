@@ -30,6 +30,10 @@ OK = 0x9BE0A8         # fresh age
 WARN = 0xF2C98A       # older age, unheard
 ERR = FAIL_TEXT
 SENDER_COLORS = (CHAN_FG, DM_FG, 0xF2C98A, 0x9BE0A8, 0x6CB4FF, 0xFFB89C)
+ON_ACCENT = BG        # text and icons on accent fills
+KEYBOARD = 0x0A0E13
+PIN_RPTR, PIN_ROOM = 0x6CB4FF, 0x9BE0A8
+# These are the dark palette; ui_theme.apply() swaps in the one in use (ui_palette).
 
 MAX_TEXT_LEN = 160          # bytes of text in one MeshCore message (BaseChatMesh.h)
 QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")

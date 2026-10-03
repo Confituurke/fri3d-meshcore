@@ -1,12 +1,14 @@
-"""Settings sub-pages: the name, a new channel, the quick replies and our own position."""
+"""Settings sub-pages: the name, a new channel, the quick replies, our own position and the
+app's look."""
 
 import lvgl as lv
 
 from mpos import Activity, Intent
 
 import ui_model
+import ui_palette
 import ui_theme as T
-from meshcore_manager import MeshCoreManager, MAX_QUICK_REPLIES, MAX_QUICK_REPLY_LEN
+from meshcore_manager import MeshCoreManager, MESHCORE_APP, MAX_QUICK_REPLIES, MAX_QUICK_REPLY_LEN
 
 
 class _FormActivity(Activity):
@@ -33,9 +35,9 @@ class _FormActivity(Activity):
         ta.add_event_cb(lambda e: self._kb.set_textarea(ta), lv.EVENT.FOCUSED, None)
         return ta
 
-    def hint(self, text, col=T.MUTED):
-        return T.label(self.body, text, 15, col=col, long_mode=lv.label.LONG_MODE.WRAP,
-                       width=lv.pct(100))
+    def hint(self, text, col=None):
+        return T.label(self.body, text, 15, col=T.MUTED if col is None else col,
+                       long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
 
 
 class NameActivity(_FormActivity):
@@ -272,3 +274,69 @@ class CoordinatesActivity(_FormActivity):
         else:
             self._msg.set_text(err)
             self._msg.set_style_text_color(T.color(T.FAIL_TEXT), lv.PART.MAIN)
+
+
+def appearance_text():
+    """The Settings row's value: "System", or what the app pins ("Dark · Teal")."""
+    from mpos import SharedPreferences
+    prefs = SharedPreferences(MESHCORE_APP)
+    theme = prefs.get_string("theme", "system") or "system"
+    accent = prefs.get_string("accent", "system") or "system"
+    parts = [n for n, v in ui_palette.THEMES if v == theme and v != "system"]
+    parts += [n for n, v in ui_palette.ACCENTS if v == accent and v != "system"]
+    return " \u00b7 ".join(parts) if parts else "System"
+
+
+class AppearanceActivity(Activity):
+    """Light or dark, and the accent colour: MicroPythonOS's by default, or the app's own."""
+
+    SWATCH = 44
+
+    def onCreate(self):
+        from mpos import SharedPreferences
+        self.prefs = SharedPreferences(MESHCORE_APP)
+        self.scr = T.make_screen()
+        self.build()
+        self.setContentView(self.scr)
+
+    def build(self):
+        T.HeaderSub(self.scr, "Appearance", back=self.finish)
+        body = T.scroll_area(self.scr, 14, 8)
+        body.set_style_pad_ver(8, lv.PART.MAIN)
+        theme = self.prefs.get_string("theme", "system") or "system"
+        accent = self.prefs.get_string("accent", "system") or "system"
+        values = [v for _, v in ui_palette.THEMES]
+        T.section_label(body, "Theme")
+        self.theme = T.Segmented(body, [n for n, _ in ui_palette.THEMES],
+                                 lambda i: self.choose("theme", values[i]),
+                                 values.index(theme) if theme in values else 0)
+        T.section_label(body, "Accent colour")
+        grid = T.box(body, lv.pct(100), lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW_WRAP)
+        grid.set_style_pad_column(10, lv.PART.MAIN)
+        grid.set_style_pad_row(10, lv.PART.MAIN)
+        self.swatches = {}
+        os_accent = T._os_look()[1]
+        for name, value in ui_palette.ACCENTS:
+            cell = T.column(grid, 52, lv.SIZE_CONTENT, 4)
+            cell.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
+            sw = T.box(cell, self.SWATCH, self.SWATCH)
+            c = (os_accent if os_accent is not None else ui_palette.DESIGN_ACCENT) \
+                if value == "system" else int(value, 16)
+            on = value == accent
+            T.fill(sw, c, self.SWATCH // 2, T.TEXT if on else T.OUTLINE, 3 if on else 1)
+            T.label(cell, name, 13, 600 if on else 400, col=T.TEXT if on else T.MUTED)
+            T.clickable(cell, lambda v=value: self.choose("accent", v), feedback=False)
+            self.swatches[value] = sw
+        T.label(body, "System follows the light or dark mode and the colour set in "
+                "MicroPythonOS's settings.", 13, col=T.MUTED,
+                long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+
+    def choose(self, key, value):
+        ed = self.prefs.edit()
+        ed.put_string(key, value)
+        ed.commit()
+        T.apply()
+        self.scr.clean()                # this page again, in the new colours
+        T.fill(self.scr, T.BG)
+        self.scr.set_style_text_color(T.color(T.TEXT), lv.PART.MAIN)
+        self.build()
