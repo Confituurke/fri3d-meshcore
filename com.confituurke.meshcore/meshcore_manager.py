@@ -180,6 +180,7 @@ TUNES = {
     "advert": "advert:d=32,o=5,b=180:c",    # low and shorter: a node announced itself
     "test": "test:d=8,o=6,b=180:c",
 }
+LAST_TS_SLACK_S = 300       # a last advert time further ahead of the clock is a leftover
 GPS_DETECT_MS = 20000       # GPS switched on, nothing heard from it this long: no GPS, off again
 GPS_POLL_MS = 1000          # bring in the GPS's sentences this often
 GPS_SAVE_MS = 600000        # write a moving GPS position to flash at most this often
@@ -272,6 +273,7 @@ class MeshCoreManager:
         self._unread = {}                        # channel name / contact pubkey_hex -> unread count
         self._mentions = set()                   # keys whose unread messages mention us
         self._newest_heard_ts = 0                # clock fallback, see _timestamp()
+        self._newest_heard_ms = 0
         self._busy_since = None                  # ticks when a packet started arriving
         # --- radio statistics (Radio tab) ---
         self._noise = []                         # noise-floor samples (dBm), oldest first
@@ -530,9 +532,23 @@ class MeshCoreManager:
         return self._nick or self.default_nickname()
 
     def _note_heard_ts(self, ts):
-        """Remember the newest plausible timestamp heard from the mesh (clock fallback)."""
-        if ts and ts > self._newest_heard_ts and ts > CLOCK_VALID_AFTER:
-            self._newest_heard_ts = ts
+        """Remember the newest plausible timestamp heard from the mesh (clock fallback),
+        and when: mesh time runs on from there. With a set clock, a time more than a day
+        ahead of it is some node's wrong clock and is not believed."""
+        if not ts or ts <= CLOCK_VALID_AFTER or ts <= self._mesh_now():
+            return
+        now = unix_time()
+        if now >= CLOCK_VALID_AFTER and ts > now + 86400:
+            return
+        self._newest_heard_ts = ts
+        self._newest_heard_ms = self._now_ms()
+
+    def _mesh_now(self):
+        """The newest time heard on the mesh, plus the seconds since it was heard."""
+        if not self._newest_heard_ts:
+            return 0
+        return self._newest_heard_ts + max(0, tdiff(self._now_ms(),
+                                                    self._newest_heard_ms)) // 1000
 
     def _timestamp(self, unique=False):
         """Unix time for an outgoing packet. Without a set clock (no Wi-Fi), fall back to
@@ -541,7 +557,9 @@ class MeshCoreManager:
         persists it: peers drop an advert that is not newer than the last one."""
         t = unix_time()
         if t < CLOCK_VALID_AFTER:
-            t = max(t, self._newest_heard_ts)
+            t = max(t, self._mesh_now())
+        if self._last_ts > t + LAST_TS_SLACK_S:
+            self._last_ts = 0           # a leftover from a clock that was wrong: not a floor
         if unique:
             if t <= self._last_ts:
                 t = self._last_ts + 1
