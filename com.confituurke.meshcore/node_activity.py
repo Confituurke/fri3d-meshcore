@@ -75,8 +75,43 @@ class NodeDetailActivity(Activity):
         key = T.card(body, filled=False, pad_ver=10, pad_hor=14)
         T.label(key, d["pubkey"], 14, mono=True, long_mode=lv.label.LONG_MODE.WRAP,
                 width=lv.pct(100))
+        self.manage = T.column(body, lv.pct(100), lv.SIZE_CONTENT, 8)
+        self._build_manage()
         self.refresh()
         self.setContentView(scr)
+
+    def _build_manage(self):
+        """Add or remove the contact, and remove it from the discovered list (asked first)."""
+        import quick_actions
+        self.manage.clean()
+        name = ui_model.display(self.node.get("name")) or self.pk[:8]
+        if self.mgr.is_contact(self.pk):
+            b = T.button(self.manage, "Remove contact",
+                         lambda: self._sheet(quick_actions.ask_remove_contact(
+                             self.mgr, self.pk, name, self._build_manage)),
+                         kind="outline", h=48, width=lv.pct(100))
+            T.outline(b, T.FAIL_TEXT, 12, 2)
+        else:
+            T.button(self.manage, "Add to contacts", self.add_contact, h=48, width=lv.pct(100))
+        if self.mgr.get_node(self.pk) is not None:
+            b = T.button(self.manage, "Remove from discovered",
+                         lambda: self._sheet(quick_actions.ask_forget(
+                             self.mgr, self.pk, name, self._forgotten)),
+                         kind="outline", h=48, width=lv.pct(100))
+            T.outline(b, T.FAIL_TEXT, 12, 2)
+
+    def _sheet(self, sheet):
+        self.sheet = sheet
+
+    def add_contact(self):
+        self.mgr.add_contact(self.pk, self.node.get("name"), self.node.get("type", 1))
+        self._build_manage()
+
+    def _forgotten(self):
+        if self.mgr.is_contact(self.pk):
+            self._build_manage()
+        else:
+            self.finish()               # nothing left to show
 
     # --- events ------------------------------------------------------------- #
     def onResume(self, screen):
@@ -85,6 +120,7 @@ class NodeDetailActivity(Activity):
         self.refresh()
 
     def onPause(self, screen):
+        T.close_sheets()
         self.mgr.remove_subscriber(self._on_event)
         super().onPause(screen)
 

@@ -76,6 +76,9 @@ class TestNodes(unittest.TestCase):
         self.assertTrue("Add to contacts" in sheet.rows and "Remove from discovered" in sheet.rows)
         sheet.rows["Remove from discovered"].send_event(lv.EVENT.CLICKED, None)
         wait_for_render(10)
+        self.assertIsNotNone(self.m.get_node(mc_fixtures.GENT))         # asked first
+        ui_theme.ActionSheet.shown[-1].rows["Remove from discovered"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
         self.assertIsNone(self.m.get_node(mc_fixtures.GENT))
         self.assertFalse(mc_fixtures.GENT in page.nodes._order)
 
@@ -120,6 +123,48 @@ class TestNodes(unittest.TestCase):
         self.assertTrue(click_label("Advert"))
         wait_for_render(5)
         self.assertEqual(rec.calls[0][2], {"flood": False})
+
+    def _sheet_click(self, text):
+        import ui_theme
+        ui_theme.ActionSheet.shown[-1].rows[text].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+
+    def test_detail_adds_and_removes_the_contact_with_a_question(self):
+        page = _open_detail(mc_fixtures.GENT)
+        self.assertTrue(find_label_with_text(lv.screen_active(), "Add to contacts") is not None)
+        self.assertTrue(click_label("Add to contacts"))
+        wait_for_render(10)
+        self.assertTrue(self.m.is_contact(mc_fixtures.GENT))
+        self.assertTrue(click_label("Remove contact"))
+        wait_for_render(10)
+        self.assertTrue(self.m.is_contact(mc_fixtures.GENT))          # asked first
+        self._sheet_click("Cancel")
+        self.assertTrue(self.m.is_contact(mc_fixtures.GENT))
+        self.assertTrue(click_label("Remove contact"))
+        wait_for_render(10)
+        self._sheet_click("Remove contact")
+        self.assertFalse(self.m.is_contact(mc_fixtures.GENT))
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Add to contacts"))
+
+    def test_detail_removes_from_discovered_after_asking(self):
+        mc_fixtures.push_base()                      # a screen to go back to
+        _open_detail(mc_fixtures.GENT)
+        self.assertTrue(click_label("Remove from discovered"))
+        wait_for_render(10)
+        self.assertIsNotNone(self.m.get_node(mc_fixtures.GENT))
+        self._sheet_click("Remove from discovered")
+        self.assertIsNone(self.m.get_node(mc_fixtures.GENT))
+        wait_for_render(20)
+        self.assertFalse("NodeDetailActivity" in mc_fixtures.stack_names())
+
+    def test_menu_removals_ask_first(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab="Contacts")
+        act._tab.menu(mc_fixtures.BOB)
+        self._sheet_click("Remove contact")
+        self.assertTrue(self.m.is_contact(mc_fixtures.BOB))
+        self._sheet_click("Remove contact")
+        self.assertFalse(self.m.is_contact(mc_fixtures.BOB))
 
 
 STATUS = {"battery_mv": 4020, "uptime_s": 1051200, "noise_floor": -112, "last_snr": -3.5,
