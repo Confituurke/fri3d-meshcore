@@ -253,6 +253,7 @@ class MeshCoreManager:
         self._channels = [PUBLIC_CHANNEL]        # Channel objects
         self._messages = {PUBLIC_CHANNEL.name: []}   # channel name -> [msg dicts]
         self._dm_messages = {}                   # contact pubkey_hex -> [msg dicts] (persisted)
+        self._dm_names = {}                      # former contacts whose chat was kept: pubkey -> name
         self._contacts = {}                      # contact pubkey_hex -> contact dict (persisted)
         self._pending_acks = {}                  # ack_hex -> (pubkey_hex, msg) for sent DMs
         self._pending_order = []                 # ack_hex FIFO, to cap _pending_acks
@@ -2841,18 +2842,62 @@ class MeshCoreManager:
         self._notify("contacts", None)
         return (True, None)
 
-    def remove_contact(self, pubkey_hex):
-        if pubkey_hex not in self._contacts:
+    def remove_contact(self, pubkey_hex, delete_chat=False):
+        """No longer a contact. Its chat stays (listed under its last name, read only until
+        the node is added again) unless `delete_chat`."""
+        c = self._contacts.pop(pubkey_hex, None)
+        if c is None:
             return False
-        del self._contacts[pubkey_hex]
-        self._dm_messages.pop(pubkey_hex, None)
-        self._unread.pop(pubkey_hex, None)
-        self._mentions.discard(pubkey_hex)
-        self._unread_dirty = True
+        if delete_chat or not self._dm_messages.get(pubkey_hex):
+            self.remove_chat(pubkey_hex)
+        else:
+            self._dm_names[pubkey_hex] = c.get("name") or pubkey_hex[:2]
+            self._dirty_history.add(pubkey_hex)
         self._save_contacts()
-        self._delete_history(pubkey_hex)   # drop the stored chat history too
         self._notify("contacts", None)
         return True
+
+    def remove_chat(self, key):
+        """Remove a chat: a channel is left; a DM's history goes (the contact stays)."""
+        if self.get_channel(key) is not None:
+            self.remove_channel(key)
+            self._messages.pop(key, None)
+            self._dirty_channels.add(key)
+        else:
+            self._dm_messages.pop(key, None)
+            self._dm_names.pop(key, None)
+            self._dirty_history.add(key)
+        self._unread.pop(key, None)
+        self._mentions.discard(key)
+        self._unread_dirty = True
+        if not self._worker_running:
+            self._flush_dirty()
+        self._notify("dm" if self.get_channel(key) is None else "message", (key, None))
+
+    def chat_name(self, pubkey_hex):
+        """The name to show for a direct chat: the contact's, the name kept with a former
+        contact's chat, the node's, or the id."""
+        c = self._contacts.get(pubkey_hex) or {}
+        n = self._nodes.get(pubkey_hex) or {}
+        return (c.get("name") or self._dm_names.get(pubkey_hex) or n.get("name")
+                or pubkey_hex[:2])
+
+    def get_dm_chats(self):
+        """Direct chats: every contact that is a chat (companions, rooms), and former
+        contacts whose chat was kept: [{pubkey, name, type, contact}]."""
+        out = []
+        for c in self._contacts.values():
+            if c.get("type", 1) in (2, 4):      # repeaters and sensors are nodes, not chats
+                continue
+            out.append({"pubkey": c["pubkey"], "name": c.get("name"), "type": c.get("type", 1),
+                        "id": c.get("id"), "contact": True})
+        for pk, msgs in self._dm_messages.items():
+            if pk in self._contacts or not msgs:
+                continue
+            node = self._nodes.get(pk) or {}
+            out.append({"pubkey": pk, "name": self._dm_names.get(pk) or node.get("name") or pk[:2],
+                        "type": node.get("type", 1), "id": pk[:2], "contact": False})
+        return out
 
     # --- contact / history persistence (SharedPreferences) ----------------- #
     def _load_contacts(self):
@@ -2894,6 +2939,11 @@ class MeshCoreManager:
                 self._dm_messages[pub_hex] = self._clean_history(histories.get(pub_hex), dm=True)
             except Exception as e:
                 print("MeshCore: skipping bad contact %r: %s" % (pub_hex, e))
+        names = self._read_store(DM_HISTORY_FILE, "n")
+        for pub_hex, msgs in histories.items():
+            if pub_hex not in self._contacts and msgs and pub_hex in names:
+                self._dm_messages[pub_hex] = self._clean_history(msgs, dm=True)
+                self._dm_names[pub_hex] = names[pub_hex]
 
     def _load_nodes(self):
         """The nodes heard before the restart. Their age comes back from the time they were
@@ -3061,9 +3111,11 @@ class MeshCoreManager:
             pending = set(self._dirty_history)
             self._dirty_history.clear()
             try:
-                data = {k: v for k, v in self._dm_messages.items() if k in self._contacts}
+                data = {k: v for k, v in self._dm_messages.items()
+                        if v and (k in self._contacts or k in self._dm_names)}
                 ed = self._editor(DM_HISTORY_FILE)
                 ed.put_dict("h", data)
+                ed.put_dict("n", {k: v for k, v in self._dm_names.items() if k in data})
                 self._commit(ed)
                 if getattr(self, "_migrate_dm_history", False):
                     ed = self._editor()
@@ -3362,7 +3414,7 @@ class MeshCoreManager:
         # Every change to a message is announced, so this is where history goes dirty.
         if event == "message":
             self._dirty_channels.add(data[0])
-        elif event == "dm" and data[0] in self._contacts:
+        elif event == "dm" and (data[0] in self._contacts or data[0] in self._dm_names):
             self._dirty_history.add(data[0])
         for cb in list(self._subscribers):
             try:

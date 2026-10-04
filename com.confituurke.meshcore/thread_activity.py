@@ -147,6 +147,7 @@ class ThreadActivity(Activity):
 
     def _build_composer(self, scr):
         bar = T.row(scr, T.W, T.COMPOSER_H + 1, 8)
+        self.composer = bar
         T.fill(bar, T.BAR)
         T.divider(bar, lv.BORDER_SIDE.TOP)
         bar.set_style_pad_left(12, lv.PART.MAIN)
@@ -357,8 +358,7 @@ class DMChatActivity(ThreadActivity):
         return self._contact().get("type") == 3
 
     def title(self):
-        c = self._contact()
-        return ui_model.display(c.get("name")) or self.key()[:8]
+        return ui_model.display(self.mgr.chat_name(self.key())) or self.key()[:8]
 
     def route_text(self):
         c = self._contact()
@@ -400,7 +400,54 @@ class DMChatActivity(ThreadActivity):
 
     def _on_change(self):
         self.header.pill_label.set_text(self.route_text())
+        self._update_contact_state()
         super()._on_change()
+
+    def _build_composer(self, scr):
+        super()._build_composer(scr)
+        # a former contact's kept chat: read only until the node is added again
+        self.notice = T.column(scr, T.W, lv.SIZE_CONTENT, 8)
+        T.fill(self.notice, T.BAR)
+        T.divider(self.notice, lv.BORDER_SIDE.TOP)
+        self.notice.set_style_pad_all(12, lv.PART.MAIN)
+        self.notice_text = T.label(self.notice, "", 15, col=T.MUTED,
+                                   long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        buttons = T.row(self.notice, lv.pct(100), 44, 8)
+        b = T.button(buttons, "Add contact", self.add_contact, h=44, width=1, size=16)
+        b.set_flex_grow(1)
+        b = T.button(buttons, "Delete chat", self.ask_delete, kind="outline", h=44, width=1,
+                     size=16)
+        b.set_flex_grow(1)
+        T.outline(b, T.FAIL_TEXT, 10, 2)
+        self._update_contact_state()
+
+    def _update_contact_state(self):
+        if self.mgr.is_contact(self.key()):
+            self.composer.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.quick.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.notice.add_flag(lv.obj.FLAG.HIDDEN)
+            self.header.pill.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self.composer.add_flag(lv.obj.FLAG.HIDDEN)
+            self.quick.add_flag(lv.obj.FLAG.HIDDEN)
+            self.notice.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.header.pill.add_flag(lv.obj.FLAG.HIDDEN)
+            self.notice_text.set_text("%s is not a contact. Add it to send messages, or delete "
+                                      "the chat." % self.title())
+
+    def add_contact(self):
+        node = self.mgr.get_node(self.key()) or {}
+        self.mgr.add_contact(self.key(), self.mgr.chat_name(self.key()), node.get("type", 1))
+        self._update_contact_state()
+
+    def ask_delete(self):
+        import quick_actions
+
+        def delete():
+            self.mgr.remove_chat(self.key())
+            self.finish()
+        self.sheet = quick_actions.confirm("Delete the chat with %s?" % self.title(),
+                                           "Its messages go.", "Delete chat", delete)
 
 
 class ChannelInfoActivity(Activity):

@@ -106,7 +106,7 @@ class TestRouting(unittest.TestCase):
         for text in ("Open", "Mark as read", "Sounds…", "Region scope…", "Channel info",
                      "Clear history"):
             self.assertIn(text, sheet.rows)
-        self.assertFalse("Leave channel" in sheet.rows)          # Public stays
+        self.assertFalse("Remove channel" in sheet.rows)         # Public stays
         sheet_click(sheet, "Mark as read")
         self.assertEqual(self.m.get_unread("Public"), 0)
         act._tab.menu("Public", "channel")
@@ -164,6 +164,79 @@ class TestRouting(unittest.TestCase):
         top().finish()
         wait_for_render(20)
         self.assertEqual(info._scope_row.value.get_text(), "none")
+
+
+    def _click(self, text):
+        import ui_theme
+        ui_theme.ActionSheet.shown[-1].rows[text].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+
+    def test_remove_contact_asks_about_its_chat(self):
+        act = mc_fixtures.open_app()
+        act._tab.menu(mc_fixtures.ALEX, "dm")
+        self._click("Remove contact")
+        self._click("Remove contact, keep the chat")
+        self.assertFalse(self.m.is_contact(mc_fixtures.ALEX))
+        self.assertTrue(len(self.m.get_dm_messages(mc_fixtures.ALEX)) > 0)
+        self.assertTrue(mc_fixtures.ALEX in act._tab._rows)          # still listed in Chats
+        self.assertEqual(act._tab._rows[mc_fixtures.ALEX].title.get_text(), "Alex")
+        act._tab.menu(mc_fixtures.ALEX, "dm")
+        import ui_theme
+        self.assertFalse("Remove contact" in ui_theme.ActionSheet.shown[-1].rows)
+        self._click("Remove chat")
+        self._click("Remove chat")                                   # confirmed
+        self.assertFalse(mc_fixtures.ALEX in act._tab._rows)
+
+    def test_remove_contact_and_chat_at_once(self):
+        act = mc_fixtures.open_app()
+        act._tab.menu(mc_fixtures.ALEX, "dm")
+        self._click("Remove contact")
+        self._click("Remove contact and chat")
+        self.assertEqual(self.m.get_dm_messages(mc_fixtures.ALEX), [])
+        self.assertFalse(mc_fixtures.ALEX in act._tab._rows)
+
+    def test_remove_a_chat_keeps_the_contact(self):
+        act = mc_fixtures.open_app()
+        act._tab.menu(mc_fixtures.ALEX, "dm")
+        self._click("Remove chat")
+        self.assertTrue(len(self.m.get_dm_messages(mc_fixtures.ALEX)) > 0)   # asked first
+        self._click("Remove chat")
+        self.assertEqual(self.m.get_dm_messages(mc_fixtures.ALEX), [])
+        self.assertTrue(self.m.is_contact(mc_fixtures.ALEX))
+
+    def test_remove_a_channel_after_asking(self):
+        self.m.add_channel("#test", "")
+        act = mc_fixtures.open_app()
+        act._tab.menu("#test", "channel")
+        self._click("Remove channel")
+        self.assertTrue("#test" in self.m.get_channel_names())
+        self._click("Remove channel")
+        self.assertFalse("#test" in self.m.get_channel_names())
+
+
+    def test_a_former_contacts_chat_is_read_only(self):
+        self.m.remove_contact(mc_fixtures.ALEX)                     # keeps the chat
+        mc_fixtures.push_base()
+        act = mc_fixtures.open_thread("dm", mc_fixtures.ALEX)
+        self.assertTrue(act.composer.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertFalse(act.notice.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue("Alex is not a contact" in act.notice_text.get_text())
+        act.add_contact()
+        wait_for_render(5)
+        self.assertTrue(self.m.is_contact(mc_fixtures.ALEX))
+        self.assertFalse(act.composer.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue(act.notice.has_flag(lv.obj.FLAG.HIDDEN))
+
+    def test_a_former_contacts_chat_can_be_deleted_after_asking(self):
+        self.m.remove_contact(mc_fixtures.ALEX)
+        mc_fixtures.push_base()
+        act = mc_fixtures.open_thread("dm", mc_fixtures.ALEX)
+        act.ask_delete()
+        self.assertTrue(len(self.m.get_dm_messages(mc_fixtures.ALEX)) > 0)
+        self._click("Delete chat")
+        self.assertEqual(self.m.get_dm_messages(mc_fixtures.ALEX), [])
+        wait_for_render(20)
+        self.assertFalse("DMChatActivity" in mc_fixtures.stack_names())
 
 
 if __name__ == "__main__":

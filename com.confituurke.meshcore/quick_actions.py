@@ -16,12 +16,29 @@ def confirm(title, text, action, callback):
 
 
 def ask_remove_contact(mgr, pk, name, then=None):
-    def go():
-        mgr.remove_contact(pk)
+    """Remove a contact; with a chat, ask whether the chat goes too."""
+    def go(delete_chat):
+        mgr.remove_contact(pk, delete_chat=delete_chat)
         if then:
             then()
-    return confirm("Remove %s?" % name, "It stays among the discovered nodes; its chat is "
-                   "kept until you clear it.", "Remove contact", go)
+    if mgr.get_dm_messages(pk):
+        return T.ActionSheet("Remove %s?" % name, [
+            ("Remove contact, keep the chat", lambda: go(False), "danger"),
+            ("Remove contact and chat", lambda: go(True), "danger"),
+            ("Cancel", lambda: None)],
+            "It stays among the discovered nodes. A kept chat can be read; to write again, "
+            "add the contact again.")
+    return confirm("Remove %s?" % name, "It stays among the discovered nodes.",
+                   "Remove contact", lambda: go(False))
+
+
+def ask_remove_chat(mgr, key, name, channel=False):
+    if channel:
+        return confirm("Remove %s?" % name, "You leave the channel and its messages go; "
+                       "join again with its name or key.", "Remove channel",
+                       lambda: mgr.remove_chat(key))
+    return confirm("Remove the chat with %s?" % name, "Its messages go; the contact stays.",
+                   "Remove chat", lambda: mgr.remove_chat(key))
 
 
 def ask_forget(mgr, pk, name, then=None):
@@ -54,7 +71,7 @@ def chat_menu(activity, mgr, key, kind, open_chat):
     if kind == "channel":
         title = key
     else:
-        title = ui_model.display((mgr.get_contact(key) or {}).get("name")) or key[:8]
+        title = ui_model.display(mgr.chat_name(key)) or key[:8]
     actions = [("Open", lambda: open_chat(key, kind))]
     if mgr.get_unread(key):
         actions.append(("Mark as read", lambda: mgr.clear_unread(key)))
@@ -68,16 +85,17 @@ def chat_menu(activity, mgr, key, kind, open_chat):
             "Clear %s?" % title, "Every message in this channel goes.", "Clear history",
             lambda: mgr.clear_history(key)), "danger"))
         if key != "Public":
-            actions.append(("Leave channel", lambda: confirm(
-                "Leave %s?" % title, "You stop receiving it; join again with its name or key.",
-                "Leave channel", lambda: mgr.remove_channel(key)), "danger"))
+            actions.append(("Remove channel", lambda: ask_remove_chat(mgr, key, title, True),
+                            "danger"))
     else:
         actions += node_actions(activity, mgr, key, chat=False)
         actions.append(("Clear history", lambda: confirm(
             "Clear the chat with %s?" % title, "Every message in this chat goes.",
             "Clear history", lambda: mgr.clear_history(key)), "danger"))
-        actions.append(("Remove contact", lambda: ask_remove_contact(mgr, key, title),
-                        "danger"))
+        actions.append(("Remove chat", lambda: ask_remove_chat(mgr, key, title), "danger"))
+        if mgr.is_contact(key):
+            actions.append(("Remove contact", lambda: ask_remove_contact(mgr, key, title),
+                            "danger"))
     return T.ActionSheet(title, actions, "Channel" if kind == "channel" else "Contact")
 
 

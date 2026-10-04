@@ -148,10 +148,8 @@ def chat_rows(mgr, now_s, filt="all", tz_s=0):
             rows.append({"key": name, "kind": "channel", "title": display(name), "initials": "#",
                          "last": last})
     if filt != "channels":
-        for c in mgr.get_contacts():
+        for c in mgr.get_dm_chats():   # contacts and former contacts with a chat kept
             ctype = c.get("type", 1)
-            if ctype in (2, 4):          # repeaters and sensors are nodes, not chats
-                continue
             msgs = mgr.get_dm_messages(c["pubkey"])
             last = msgs[-1] if msgs else None
             name = display(c.get("name")) or c["id"]
