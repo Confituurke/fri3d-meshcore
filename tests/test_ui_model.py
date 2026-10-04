@@ -307,6 +307,8 @@ def test_chats_leave_repeaters_out_and_show_rooms():
     ui = _ui()
     m.add_contact("f1" + "33" * 31, "Gent-Noord", 2)
     m.add_contact("7c" + "55" * 31, "Gent BBS", 3)
+    m._add_dm("7c" + "55" * 31, {"ts": NOW - 60, "sender": "Sam", "text": "welcome",
+                                 "incoming": True})          # a room with posts is a chat
     rows = {r["title"]: r for r in ui.chat_rows(m, NOW)}
     _assert("Gent-Noord" not in rows, rows.keys())
     _assert(rows["Gent BBS"]["kind"] == "room", rows["Gent BBS"])

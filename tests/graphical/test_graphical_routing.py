@@ -203,6 +203,7 @@ class TestRouting(unittest.TestCase):
         self._click("Remove chat")
         self.assertEqual(self.m.get_dm_messages(mc_fixtures.ALEX), [])
         self.assertTrue(self.m.is_contact(mc_fixtures.ALEX))
+        self.assertFalse(mc_fixtures.ALEX in act._tab._rows)          # gone from Chats
 
     def test_remove_a_channel_after_asking(self):
         self.m.add_channel("#test", "")

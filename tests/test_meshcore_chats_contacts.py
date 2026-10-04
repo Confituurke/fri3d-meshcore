@@ -57,7 +57,13 @@ def test_removing_a_chat_keeps_the_contact():
     m._bump_unread(pk)
     m.remove_chat(pk)
     _assert(m.is_contact(pk) and m.get_dm_messages(pk) == [] and m.get_unread(pk) == 0, "chat gone")
-    _assert(pk in [c["pubkey"] for c in m.get_dm_chats()], "a contact is always a chat")
+    _assert(pk not in [c["pubkey"] for c in m.get_dm_chats()], "an empty chat is not listed")
+
+
+def test_only_conversations_are_chats():
+    env, m, pk = _setup()
+    m.add_contact("cd" * 32, "Quiet")
+    _assert([c["pubkey"] for c in m.get_dm_chats()] == [pk], m.get_dm_chats())
 
 
 def test_removing_a_channel_chat_leaves_the_channel():

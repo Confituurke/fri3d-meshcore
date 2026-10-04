@@ -2883,11 +2883,14 @@ class MeshCoreManager:
                 or pubkey_hex[:2])
 
     def get_dm_chats(self):
-        """Direct chats: every contact that is a chat (companions, rooms), and former
-        contacts whose chat was kept: [{pubkey, name, type, contact}]."""
+        """Direct chats: the conversations (with a contact, a room, or a former contact whose
+        chat was kept) that hold messages or unread ones: [{pubkey, name, type, contact}].
+        A contact without messages is in Contacts, not in Chats."""
         out = []
         for c in self._contacts.values():
             if c.get("type", 1) in (2, 4):      # repeaters and sensors are nodes, not chats
+                continue
+            if not self._dm_messages.get(c["pubkey"]) and not self._unread.get(c["pubkey"]):
                 continue
             out.append({"pubkey": c["pubkey"], "name": c.get("name"), "type": c.get("type", 1),
                         "id": c.get("id"), "contact": True})
