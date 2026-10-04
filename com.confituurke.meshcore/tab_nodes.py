@@ -265,8 +265,13 @@ class DiscoveredActivity(Activity):
 
     def more(self):
         self.sheet = T.ActionSheet("Discovered", [
-            ("Clear discovered", self.ask_clear, "danger")],
-            "Nodes that are not contacts")
+            ("Clear discovered", self.ask_clear, "danger"),
+            ("Discovered nodes map", self.open_map)],
+            "Nodes heard")
+
+    def open_map(self):
+        import map_view
+        self.startActivity(Intent(activity_class=map_view.DiscoveredMapActivity))
 
     def ask_clear(self):
         self.sheet = T.ActionSheet("Clear the discovered list?", [

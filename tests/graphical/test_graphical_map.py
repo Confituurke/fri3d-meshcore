@@ -73,6 +73,8 @@ class TestMap(unittest.TestCase):
         self.m._nodes[mc_fixtures.GENT].update(lat=GENT[0], lon=GENT[1])
 
     def tearDown(self):
+        import ui_theme
+        ui_theme.close_sheets()
         self.map_view.MAPS = self.maps
         self.set_theme("system")
         mpos.ui.remove_and_stop_all_activities()
@@ -84,7 +86,9 @@ class TestMap(unittest.TestCase):
         ed.put_string("theme", theme)
         ed.commit()
 
-    def test_tab_shows_a_pin_per_positioned_node(self):
+    def test_tab_shows_a_pin_per_positioned_contact(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        self.m.add_contact(mc_fixtures.GENT, "Gent-Noord", 2)
         act = mc_fixtures.open_app(tab="Map")
         view = act._tab.view
         self.assertEqual(sorted(p["pubkey"] for p in view._pin_model),
@@ -94,7 +98,33 @@ class TestMap(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not view.note.has_flag(lv.obj.FLAG.HIDDEN)))
         self.assertIn("No map tiles here", view.note.get_text())
 
+    def test_the_main_map_leaves_out_nodes_that_are_not_contacts(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab="Map")
+        self.assertEqual([p["pubkey"] for p in act._tab.view._pin_model], [mc_fixtures.BOB])
+
+    def test_discovered_map_shows_every_node_heard(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab="Contacts")
+        act._tab.open_discovered()
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        page.more()
+        import ui_theme
+        ui_theme.ActionSheet.shown[-1].rows["Discovered nodes map"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        mp = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(mp).__name__, "DiscoveredMapActivity")
+        pins = {p["pubkey"]: p for p in mp.view._pin_model}
+        self.assertEqual(sorted(pins), sorted([mc_fixtures.BOB, mc_fixtures.GENT]))
+        self.assertTrue(pins[mc_fixtures.BOB]["contact"] and not pins[mc_fixtures.GENT]["contact"])
+        mp.view.open_node(mc_fixtures.GENT, "rptr")             # a tap: the node's menu
+        sheet = ui_theme.ActionSheet.shown[-1]
+        self.assertTrue("Add to contacts" in sheet.rows)
+        ui_theme.close_sheets()
+
     def test_tapping_a_repeater_pin_opens_its_detail(self):
+        self.m.add_contact(mc_fixtures.GENT, "Gent-Noord", 2)
         act = mc_fixtures.open_app(tab="Map")
         view = act._tab.view
         pin = [p for p in view._pin_model if p["pubkey"] == mc_fixtures.GENT][0]
@@ -106,6 +136,8 @@ class TestMap(unittest.TestCase):
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "NodeDetailActivity")
 
     def test_zoom_and_fit(self):
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        self.m.add_contact(mc_fixtures.GENT, "Gent-Noord", 2)
         act = mc_fixtures.open_app(tab="Map")
         view = act._tab.view
         z = view.z

@@ -78,8 +78,11 @@ def _read_file(path):
         return f.read()
 
 
-def _nodes(mgr):
-    """Nodes heard and saved contacts, each once, nodes first."""
+def _nodes(mgr, source="all"):
+    """The nodes to pin: "contacts" (with what was last heard of them), or "all": every node
+    heard and every contact, each once."""
+    if source == "contacts":
+        return mgr.get_contact_nodes()
     out = list(mgr.get_learned_companions())
     seen = set(n.get("pubkey") for n in out)
     for c in mgr.get_contacts():
@@ -129,8 +132,10 @@ class _Slot:
 
 class MapView:
 
-    def __init__(self, parent, mgr, w, h, open_node, focus=None, controls=True):
+    def __init__(self, parent, mgr, w, h, open_node, focus=None, controls=True,
+                 source="contacts"):
         self.mgr = mgr
+        self.source = source
         self.w, self.h = w, h
         self.open_node = open_node
         self.style = tile_style()
@@ -194,7 +199,7 @@ class MapView:
         self._me_button = b
 
     def _initial_view(self, focus):
-        nodes = _nodes(self.mgr)
+        nodes = _nodes(self.mgr, self.source)
         me = self.mgr.position()
         if focus == "me" and me:
             return me["lat"], me["lon"], ME_ZOOM
@@ -237,7 +242,7 @@ class MapView:
         self.layout()
 
     def fit_all(self):
-        view = M.fit(self._points(_nodes(self.mgr)), self.w, self.h)
+        view = M.fit(self._points(_nodes(self.mgr, self.source)), self.w, self.h)
         self._set_view(*(view or HOME))
 
     def layout(self, load=True):
@@ -290,7 +295,7 @@ class MapView:
 
     # --- pins ----------------------------------------------------------------- #
     def refresh_pins(self):
-        self._nodes = _nodes(self.mgr)
+        self._nodes = _nodes(self.mgr, self.source)
         self._place_pins()
 
     def _place_me(self):
@@ -316,6 +321,9 @@ class MapView:
     def _place_pins(self):
         self._place_me()
         model = M.pins(self._nodes, self.cx, self.cy, self.z, self.w, self.h)
+        contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
+        for p in model:
+            p["contact"] = p["pubkey"] in contacts
         self._pin_model = model
         names = self.z >= LABEL_ZOOM or len(model) <= 12
         keep = set()
@@ -323,7 +331,10 @@ class MapView:
             pk = p["pubkey"]
             keep.add(pk)
             dot, name = self._pins.get(pk) or self._new_pin(pk)
-            T.fill(dot, pin_color(p["kind"]), PIN // 2, T.BG, 2)
+            if p["contact"]:
+                T.fill(dot, pin_color(p["kind"]), PIN // 2, T.BG, 2)
+            else:                       # heard, not added: a ring
+                T.fill(dot, T.BG, PIN // 2, pin_color(p["kind"]), 3)
             dot.set_pos(int(p["sx"]) - PIN // 2, int(p["sy"]) - PIN // 2)
             dot.remove_flag(lv.obj.FLAG.HIDDEN)
             if names:
@@ -407,6 +418,30 @@ def open_node(activity, mgr, pubkey, kind):
     activity.startActivity(intent)
 
 
+class DiscoveredMapActivity(Activity):
+    """Every node heard on a map: contacts as dots, nodes not added as rings. A tap on a pin
+    opens the node's menu (add it, details, ping...)."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        scr = T.make_screen()
+        T.HeaderSub(scr, "Discovered nodes", "Map", back=self.finish)
+        self.view = MapView(scr, self.mgr, T.W, T.H - T.TOP - T.HEADER_H, self.menu,
+                            source="all")
+        self.setContentView(scr)
+
+    def menu(self, pubkey, kind):
+        import quick_actions
+        self.sheet = quick_actions.node_menu(self, self.mgr, pubkey, discovered=True)
+
+    def onPause(self, screen):
+        T.close_sheets()
+        super().onPause(screen)
+
+    def onDestroy(self, screen):
+        self.view.destroy()
+
+
 class MapActivity(Activity):
     """The map on its own screen, centred on the node in extras["pubkey"]."""
 
@@ -417,7 +452,7 @@ class MapActivity(Activity):
         scr = T.make_screen()
         T.HeaderSub(scr, ui_model.display(node.get("name")) or "Map", "Map", back=self.finish)
         self.view = MapView(scr, self.mgr, T.W, T.H - T.TOP - T.HEADER_H,
-                            lambda p, k: open_node(self, self.mgr, p, k), focus=pk)
+                            lambda p, k: open_node(self, self.mgr, p, k), focus=pk, source="all")
         self.setContentView(scr)
 
     def onDestroy(self, screen):
