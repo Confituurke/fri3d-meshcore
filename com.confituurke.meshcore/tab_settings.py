@@ -13,7 +13,7 @@ import setup_activity
 import thread_activity
 from ui_tabs import Tab
 
-VERSION = "0.7.0"
+VERSION = "0.1.0"
 
 
 class SettingsTab(Tab):

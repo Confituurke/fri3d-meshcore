@@ -6,7 +6,7 @@ from mpos import wait_for_render
 
 import mc_fixtures
 
-KEY = "7aa6d679625b17999e96855b8969366f34d0a8ed0cca83be4996617c76980142"
+KEY = "5e1f0c3a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f"
 
 
 def top():
@@ -56,12 +56,12 @@ class TestNew(unittest.TestCase):
         page.save()
         self.assertTrue("not a public key" in page._msg.get_text())
         page._key.set_text(KEY)
-        page._name.set_text("Stadhuis")
+        page._name.set_text("Repeater Noord")
         page.set_type(1)
         page.save()
         wait_for_render(20)
         c = self.m.get_contact(KEY)
-        self.assertEqual((c["name"], c["type"]), ("Stadhuis", 2))
+        self.assertEqual((c["name"], c["type"]), ("Repeater Noord", 2))
         act._tab.new_chat()
         sheet_click("Add contact by key")
         page = top()

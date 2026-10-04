@@ -100,7 +100,7 @@ def test_far_points_fit_at_least_the_lowest_zoom():
 
 def test_pins_for_nodes_with_a_position_in_view():
     nodes = [
-        {"pubkey": "aa" * 32, "name": "Stadhuis", "type": 2, "lat": 50.8467, "lon": 4.3525},
+        {"pubkey": "aa" * 32, "name": "Repeater Noord", "type": 2, "lat": 50.8467, "lon": 4.3525},
         {"pubkey": "bb" * 32, "name": "Gent", "type": 1, "lat": 51.0543, "lon": 3.7174},
         {"pubkey": "cc" * 32, "name": "Nowhere", "type": 1, "lat": 0.0, "lon": 0.0},
         {"pubkey": "dd" * 32, "name": "Unknown", "type": 3},
@@ -109,7 +109,7 @@ def test_pins_for_nodes_with_a_position_in_view():
     pins = M.pins(nodes, cx, cy, 14, 480, 424)
     _assert([p["pubkey"] for p in pins] == ["aa" * 32], pins)
     p = pins[0]
-    _assert(p["kind"] == "rptr" and p["name"] == "Stadhuis", p)
+    _assert(p["kind"] == "rptr" and p["name"] == "Repeater Noord", p)
     _assert(abs(p["sx"] - 240) < 1 and abs(p["sy"] - 212) < 1, p)
     # zoomed out, Gent is in view too
     cx, cy = M.world_px(BRUSSELS[0], BRUSSELS[1], 9)

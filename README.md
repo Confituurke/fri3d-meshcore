@@ -1,16 +1,23 @@
-# MeshCore for MicroPythonOS — SenseCAP Indicator
+# MeshCore for MicroPythonOS
 
-A [MeshCore](https://meshcore.io/) LoRa messenger for [MicroPythonOS](https://micropythonos.com)
-devices with a built-in SX1262 radio, aimed at the Seeed SenseCAP Indicator D1L (ESP32-S3,
-480×480 touch). The app id is **`com.confituurke.meshcore`**. It is based on
-[fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
+A [MeshCore](https://meshcore.io/) LoRa messenger app for [MicroPythonOS](https://micropythonos.com)
+devices with a built-in SX1262 radio. It is laid out for 480×480 touch screens and developed
+on the Seeed SenseCAP Indicator D1L (ESP32-S3). The app id is **`com.confituurke.meshcore`**.
+It is based on [fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
 
-- **Channels:** Public plus `#hashtag` and private channels. Messages are sent and received
-  interoperably with the MeshCore apps.
-- **Direct messages:** 1:1 messages (X25519 + AES-128 + HMAC) with delivery acknowledgements.
-- **Identity:** an on-device Ed25519 keypair and signed adverts.
-- **Background radio service:** a toggle that keeps the node receiving while the app is closed.
-  It recovers the radio automatically.
+- **Chats:** Public, `#hashtag` and private channels; direct messages (X25519 + AES-128 + HMAC)
+  with delivery acknowledgements and retries; room servers. Interoperable with the MeshCore apps.
+- **Contacts:** saved contacts and a list of discovered nodes (add with +); auto-add by type and
+  hop count; add by public key or `meshcore://` contact card.
+- **Routing:** per contact auto / flood / a typed path; path hash size 1, 2 or 3 bytes; region
+  scopes with a default and a per-channel override.
+- **Repeaters and rooms:** guest or admin login, status, neighbours, telemetry, ping, trace.
+- **Message details:** hops, the path with repeater names, SNR, RSSI, region, delivery.
+- **Map:** offline tiles from the SD card with pins for contacts, a discovered-nodes map, your
+  own position (typed, picked on the map, or from a GPS).
+- **Identity:** an on-device Ed25519 key pair and signed adverts; export, or a new identity.
+- **Look:** follows the system light or dark mode and accent colour, or the app's own choice.
+- **Background radio service:** keeps receiving while the app is closed, with sounds per kind.
 
 Protocol logic is pure Python and unit-tested on the desktop.
 
@@ -23,16 +30,32 @@ SX126x driver). The board must also provide a reset hook (`LoRaManager.board_res
 milliseconds; without it the app falls back to pure-Python Ed25519/X25519, which takes seconds
 per operation on the device.
 
+Optional, used when the OS offers them: `SDCardManager` (map tiles, identity export),
+`AudioManager` with a buzzer output (sounds), `GPSManager` with an NMEA source (own position),
+`AppearanceManager` (light/dark mode and accent colour). The app works without each of them.
+
+## Map tiles
+
+The map reads 256 px PNG tiles in the usual web-map layout from the SD card:
+`<SD>/maps/<style>/{z}/{x}/{y}.png`, one folder per style. `light` and `dark` follow the app's
+theme; any other folder can be picked in Settings › Appearance › Map. An optional
+`<style>/credit.txt` holds the attribution line shown on the map. 8-bit palette PNGs with
+filter type 0 on every row decode fastest; other PNGs work too.
+
 ## Layout
 
 ```
 com.confituurke.meshcore/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
   icon_64x64.png
-  main_activity.py           # main screen: Chats / Nodes / Radio / Settings tabs
-  tab_chats.py, tab_nodes.py, tab_radio.py, tab_settings.py, ui_tabs.py
+  main_activity.py           # main screen: Chats / Contacts / Map / Radio / Settings tabs
+  tab_chats.py, tab_nodes.py, tab_map.py, tab_radio.py, tab_settings.py, ui_tabs.py
   thread_activity.py         # channel and direct-message threads
-  node_activity.py           # node detail
+  node_activity.py           # node detail (login, status, neighbours, telemetry)
+  routing_pages.py           # routing, message details, path hash size, regions, scopes
+  quick_actions.py           # long-press menus
+  settings_pages.py          # settings sub-pages (name, location, identity, appearance, ...)
+  map_model.py, map_tiles.py, map_view.py   # map maths, tile decoding, the map widget
   setup_activity.py          # first-run setup and radio preset choice
   meshcore_manager.py        # radio owner + background service (singleton)
   meshcore_packet.py         # packet parse/serialize
@@ -40,11 +63,14 @@ com.confituurke.meshcore/    # the app payload — exactly what ships in the .mp
   meshcore_crypto.py         # Ed25519 / X25519
   meshcore_advert.py         # advert parse/build + share URIs
   meshcore_dm.py             # direct-message + ack codec
+  meshcore_server.py         # repeater / room requests and replies
+  meshcore_region.py         # region scopes (transport codes)
   meshcore_radio.py          # driver adapter + radio lock helpers
   meshcore_presets.py        # radio presets and LoRa airtime
   meshcore_boot_service.py   # boot_completed service (starts the radio if enabled)
   ui_model.py                # what the screens show (pure Python, desktop-tested)
-  ui_theme.py                # colours, fonts, shared styles, header / chips / tab bar
+  ui_theme.py                # widgets, fonts, shared styles, action sheets
+  ui_palette.py              # light and dark colours, accent
   fonts/                     # Archivo Narrow + Mesh Mono (subset of IBM Plex Mono), OFL
 tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
 tests/graphical/             # screen tests on the MicroPythonOS desktop build (480x480)
@@ -65,9 +91,9 @@ HOST_IP=<this machine on the device's LAN> PYTHON=python3 tools/deploy.sh --star
 ```
 
 `deploy.sh` builds the `.mpk`, serves it briefly from this machine and types the install
-command into the device's REPL over USB serial (`tools/repl_type.py`, needs pyserial). Bulk
-copies over the serial REPL are unreliable on the SenseCAP Indicator, so the package travels
-over Wi-Fi.
+command into the device's REPL over USB serial (`tools/repl_type.py`, needs pyserial). The
+package itself travels over Wi-Fi, because bulk copies over a serial REPL are unreliable on
+some boards.
 
 ## Develop
 

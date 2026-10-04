@@ -52,7 +52,7 @@ def test_manifest_identity():
     with open(os.path.join(ROOT, APP, "MANIFEST.JSON")) as f:
         man = json.load(f)
     _assert(man["fullname"] == APP, man["fullname"])
-    _assert(man["version"] == "0.7.0", man["version"])
+    _assert(man["version"] == "0.1.0", man["version"])
 
 
 if __name__ == "__main__":
