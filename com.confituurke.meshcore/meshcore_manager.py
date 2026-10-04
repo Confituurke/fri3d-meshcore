@@ -75,6 +75,18 @@ def tdiff(a, b):
     return ((a - b + _TICKS_HALF) % _TICKS_PERIOD) - _TICKS_HALF
 
 
+def sd_root():
+    """Where the OS mounts the SD card (SDCardManager), else MicroPythonOS's usual /sdcard."""
+    try:
+        from mpos import SDCardManager
+        mp = SDCardManager.get_mount_point()
+        if mp:
+            return mp.rstrip("/") or "/"
+    except Exception:
+        pass
+    return "/sdcard"
+
+
 def parse_path(text, size):
     """Hex hops ("a1,b2" or "a1 b2"), `size` bytes each -> (path bytes, None) or (None, why)."""
     hops = [t for t in text.replace(",", " ").split() if t]
@@ -656,13 +668,14 @@ class MeshCoreManager:
             self._name_from_identity(pub)
         return pub
 
-    def export_identity(self, folder="/sdcard"):
+    def export_identity(self, folder=None):
         """Write our name and key pair to FOLDER/meshcore-identity-<id>.json. Returns
         (True, path) or (False, why)."""
         import json
         pub, prv = self.get_identity()
         if pub is None:
             return (False, "no identity yet")
+        folder = folder or sd_root()
         path = "%s/meshcore-identity-%s.json" % (folder.rstrip("/"), pub.hex()[:8])
         data = {"name": self.nickname(), "public_key": pub.hex(), "private_key": prv.hex(),
                 "exported": self._timestamp()}
@@ -728,31 +741,6 @@ class MeshCoreManager:
             print("MeshCore: contact_uri error:", repr(e))
             return None
 
-    def backup_identity_to_sd(self, path="/sdcard/meshcore_identity.json"):
-        """Write the identity (name + keys, hex) to the SD card. Returns (ok, info)."""
-        pub, prv = self.get_identity()
-        if pub is None:
-            return (False, "no identity to back up")
-        try:
-            import binascii
-            import ujson
-            from mpos import sdcard
-            sdcard.mount_with_optional_format("/sdcard")
-            data = {
-                "name": self.nickname(),
-                "node_id": "%02x" % pub[0],
-                "public_key": binascii.hexlify(pub).decode(),
-                "private_key": binascii.hexlify(prv).decode(),
-            }
-            with open(path, "w") as f:
-                ujson.dump(data, f)
-            print("MeshCore: identity backed up to", path)
-            return (True, path)
-        except Exception as e:
-            print("MeshCore: SD backup error:", repr(e))
-            return (False, str(e))
-
-    # --- advertising -------------------------------------------------------- #
     def advertise(self, flood=True):
         """Build and Ed25519-sign a self-advert so peers learn our identity/name.
 

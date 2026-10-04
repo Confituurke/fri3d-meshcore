@@ -357,7 +357,7 @@ class AppearanceActivity(Activity):
             if on:
                 T.icon(row, "check", T.ACCENT)
             T.clickable(row, lambda v=value: self.choose("map_style", v))
-        tiles = "%s/%%s/{z}/{x}/{y}.png" % map_view.MAPS
+        tiles = "%s/%%s/{z}/{x}/{y}.png" % map_view.maps_dir()
         if style == "system":
             where = "Follows the theme. Tiles go in %s and %s." % (tiles % "light", tiles % "dark")
         else:

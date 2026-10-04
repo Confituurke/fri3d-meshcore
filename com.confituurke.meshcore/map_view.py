@@ -14,7 +14,15 @@ import ui_model
 import ui_theme as T
 from meshcore_manager import MeshCoreManager
 
-MAPS = "/sdcard/maps"           # one folder per map style: <style>/{z}/{x}/{y}.png
+MAPS = None                     # the maps folder; None: "maps" on the SD card (sd_root)
+
+
+def maps_dir():
+    """Where the map styles live: one folder per style, <style>/{z}/{x}/{y}.png."""
+    if MAPS:
+        return MAPS
+    from meshcore_manager import sd_root
+    return sd_root().rstrip("/") + "/maps"
 LAND = {"dark": 0x141B23, "light": 0xEEF1F4}   # land colour of our styles, shown while loading
 HOME = (50.64, 4.67, 8)         # Belgium, when no node has a position
 CREDIT = "© OpenMapTiles © OpenStreetMap contributors"
@@ -35,7 +43,7 @@ def map_styles():
     import os
     try:
         names = []
-        for entry in os.ilistdir(MAPS):
+        for entry in os.ilistdir(maps_dir()):
             if entry[1] == 0x4000 and not entry[0].startswith("."):
                 names.append(entry[0])
         return sorted(names)
@@ -66,7 +74,7 @@ def tile_style(choice=None, available=None):
 def _credit(style):
     """The first line of the style folder's credit.txt, else the OpenStreetMap credit."""
     try:
-        with open("%s/%s/credit.txt" % (MAPS, style)) as f:
+        with open("%s/%s/credit.txt" % (maps_dir(), style)) as f:
             line = f.readline().strip()
         return line or CREDIT
     except OSError:
@@ -176,7 +184,7 @@ class MapView:
         credit.set_style_pad_hor(6, lv.PART.MAIN)
         credit.set_style_pad_ver(2, lv.PART.MAIN)
         credit.align(lv.ALIGN.BOTTOM_LEFT, 4, -4)
-        self.store = map_tiles.TileStore(MAPS + "/" + self.style, _read_file, capacity=20,
+        self.store = map_tiles.TileStore(maps_dir() + "/" + self.style, _read_file, capacity=20,
                                          on_ready=self._on_tile)
         self.store.start()
         self._timer = lv.timer_create(lambda t: self._tick(), 40, None)

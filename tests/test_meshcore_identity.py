@@ -64,5 +64,22 @@ def test_a_chosen_name_stays_with_a_new_identity():
     _assert(m.nickname() == "Kim", m.nickname())
 
 
+def test_the_sd_card_folder_comes_from_the_os():
+    import meshcore_manager as mm
+    env, m = _setup()
+    _assert(mm.sd_root() == "/sdcard", "fallback without an SD card manager")
+
+    class SDCardManager:
+        @staticmethod
+        def get_mount_point():
+            return "/sd/"
+
+    sys.modules["mpos"].SDCardManager = SDCardManager
+    try:
+        _assert(mm.sd_root() == "/sd", mm.sd_root())
+    finally:
+        del sys.modules["mpos"].SDCardManager
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())
