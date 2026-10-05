@@ -154,7 +154,7 @@ class ThreadActivity(Activity):
         bar.set_style_pad_right(8, lv.PART.MAIN)
         self._ta = T.text_input(bar, "", self.placeholder(), 1)
         self._ta.set_flex_grow(1)
-        self._ta.add_event_cb(lambda e: self._update_counter(), lv.EVENT.VALUE_CHANGED, None)
+        T.on(self._ta, lv.EVENT.VALUE_CHANGED, lambda e: self._update_counter())
         self._counter = T.label(bar, "", 12, mono=True, col=T.MUTED)
         self._send = T.box(bar, 44, 44)
         T.fill(self._send, T.ACCENT, 22)

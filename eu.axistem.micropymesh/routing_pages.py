@@ -49,7 +49,7 @@ class _Page(Activity):
 
     def field(self, text, placeholder):
         ta = T.text_input(self.body, text, placeholder)
-        ta.add_event_cb(lambda e: self._kb.set_textarea(ta), lv.EVENT.FOCUSED, None)
+        T.on(ta, lv.EVENT.FOCUSED, lambda e: self._kb.set_textarea(ta))
         return ta
 
 
