@@ -112,6 +112,14 @@ MicroPythonOS checkout with its unix build:
 MPOS_DIR=/path/to/MicroPythonOS tools/run_graphical.sh
 ```
 
+Two rules that the desktop tests check and the device enforces:
+
+- MicroPythonOS runs an entry point (`main_activity.py`, `meshcore_boot_service.py`) as a
+  script and takes the app folder off `sys.path` once the app runs. Never import an entry
+  point, and import a module inside a function only if the entry point loads it at start.
+- Add LVGL event callbacks with `ui_theme.on(obj, event, fn)`. The LVGL binding never calls a
+  callback again after it has raised once; `on` prints the error and keeps the control working.
+
 To build the package:
 
 ```

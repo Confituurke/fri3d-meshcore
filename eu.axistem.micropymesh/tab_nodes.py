@@ -114,7 +114,7 @@ class NodesTab(Tab):
         self.search_bar.set_style_pad_right(4, lv.PART.MAIN)
         self.search = T.text_input(self.search_bar, "", "Name or hex id", 1)
         self.search.set_flex_grow(1)
-        self.search.add_event_cb(lambda e: self._on_query(), lv.EVENT.VALUE_CHANGED, None)
+        T.on(self.search, lv.EVENT.VALUE_CHANGED, lambda e: self._on_query())
         T.icon_button(self.search_bar, "close", self.close_search, 44, 44)
         self.search_bar.add_flag(lv.obj.FLAG.HIDDEN)
         self.status = T.label(parent, "", 15, col=T.MUTED)

@@ -129,3 +129,6 @@ class MeshCoreHome(Activity):
             self.refresh_badge()
         if self._tab is not None:
             self._tab.on_event(event, data)
+
+
+setup_activity.HOME = MeshCoreHome

@@ -7,6 +7,7 @@ badges, tab bar, cards, buttons, radio cards, step indicator, inputs and bubbles
 """
 
 import os
+import sys
 
 import lvgl as lv
 
@@ -240,11 +241,31 @@ def _pressed_style():
     return st
 
 
+def _guarded(fn):
+    """`fn(e)` with its errors printed, not raised: this LVGL binding never calls a callback
+    again once it has raised, which would leave the control dead."""
+    def cb(e):
+        try:
+            fn(e)
+        except Exception as ex:
+            if hasattr(sys, "print_exception"):
+                sys.print_exception(ex)
+            else:
+                print("MeshCore: event handler error:", repr(ex))
+    return cb
+
+
+def on(obj, event, fn):
+    """Call `fn(e)` on `event`; an error in `fn` is printed and the control keeps working."""
+    obj.add_event_cb(_guarded(fn), event, None)
+    return obj
+
+
 def clickable(obj, on_click, feedback=True):
     obj.add_flag(lv.obj.FLAG.CLICKABLE)
     if feedback:
         obj.add_style(_pressed_style(), lv.PART.MAIN | lv.STATE.PRESSED)
-    obj.add_event_cb(lambda e: on_click(), lv.EVENT.CLICKED, None)
+    on(obj, lv.EVENT.CLICKED, lambda e: on_click())
     return obj
 
 
@@ -741,7 +762,9 @@ def switch(parent, on, on_change):
     sw.set_style_opa(lv.OPA._50, lv.PART.MAIN | lv.STATE.DISABLED)   # locked: greyed
     if on:
         sw.add_state(lv.STATE.CHECKED)
-    sw.add_event_cb(lambda e: on_change(sw.has_state(lv.STATE.CHECKED)), lv.EVENT.VALUE_CHANGED, None)
+    # `on` is the initial state here, so add the guarded callback directly.
+    sw.add_event_cb(_guarded(lambda e: on_change(sw.has_state(lv.STATE.CHECKED))),
+                    lv.EVENT.VALUE_CHANGED, None)
     return sw
 
 
@@ -821,7 +844,7 @@ def on_long_press(obj, callback):
             pass
         callback()
 
-    obj.add_event_cb(handler, lv.EVENT.LONG_PRESSED, None)
+    on(obj, lv.EVENT.LONG_PRESSED, handler)
     return obj
 
 

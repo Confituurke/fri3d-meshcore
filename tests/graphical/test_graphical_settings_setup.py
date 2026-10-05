@@ -27,9 +27,10 @@ class TestSetup(unittest.TestCase):
         wait_for_render(5)
 
     def test_setup_three_steps_and_finish(self):
+        # Started the way the OS starts it: main_activity runs as a script and opens setup.
         rec = mc_fixtures.Recorder(self.m, "advertise", result=(True, None))
-        mc_fixtures.push_base()
-        act = _open_setup()
+        act = mc_fixtures.open_app()
+        self.assertEqual(type(act).__name__, "SetupActivity")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Step 1 of 3"))
         act._name.set_text("Indy")
         self.assertTrue(click_label("Next"))
@@ -70,6 +71,26 @@ class TestSetup(unittest.TestCase):
         wait_for_render(20)
         self.assertEqual(self.m.radio_preset()["id"], "cz-narrow")
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "MeshCoreHome")
+
+
+class TestCallbackGuard(unittest.TestCase):
+    def test_click_handler_error_keeps_button_working(self):
+        import ui_theme as T
+        calls = []
+
+        def handler():
+            calls.append(1)
+            if len(calls) == 1:
+                raise ImportError("the first press fails")
+
+        obj = lv.obj(lv.layer_top())
+        try:
+            T.clickable(obj, handler)
+            obj.send_event(lv.EVENT.CLICKED, None)
+            obj.send_event(lv.EVENT.CLICKED, None)
+            self.assertEqual(len(calls), 2)
+        finally:
+            obj.delete()
 
 
 class TestSettings(unittest.TestCase):

@@ -32,7 +32,7 @@ class _FormActivity(Activity):
     def field(self, title, text="", placeholder=""):
         T.label(self.body, title, 15, col=T.MUTED)
         ta = T.text_input(self.body, text, placeholder)
-        ta.add_event_cb(lambda e: self._kb.set_textarea(ta), lv.EVENT.FOCUSED, None)
+        T.on(ta, lv.EVENT.FOCUSED, lambda e: self._kb.set_textarea(ta))
         return ta
 
     def hint(self, text, col=None):

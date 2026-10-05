@@ -15,6 +15,10 @@ BWS = ("62.5", "125", "250", "500")
 SFS = ("7", "8", "9", "10", "11", "12")
 CRS = ("5", "6", "7", "8")
 
+# The main screen's class. main_activity sets it when it loads: the OS runs main_activity as
+# a script, so it cannot be imported from here.
+HOME = None
+
 
 def _bw_text(bw):
     s = str(bw)
@@ -87,7 +91,7 @@ class SetupActivity(Activity):
 
     def _input(self, parent, text, placeholder=""):
         ta = T.text_input(parent, text, placeholder)
-        ta.add_event_cb(lambda e: self._attach(ta), lv.EVENT.FOCUSED, None)
+        T.on(ta, lv.EVENT.FOCUSED, lambda e: self._attach(ta))
         return ta
 
     def _attach(self, ta):
@@ -189,10 +193,10 @@ class SetupActivity(Activity):
             self.mgr.start()
         if self._advert:
             self.mgr.advertise(flood=True)
-        import main_activity
         # finish() pops the top of the stack, so leave first and then open the main screen.
         self.finish()
-        self.startActivity(Intent(activity_class=main_activity.MeshCoreHome))
+        if HOME is not None:
+            self.startActivity(Intent(activity_class=HOME))
 
     def back(self):
         if self._only_preset:
