@@ -3,7 +3,7 @@
 Hardware-independent and unit-testable off-badge -- deliberately free of `mpos`, `lvgl` and
 `drivers` imports at module level, so the translation logic can be exercised in desktop
 CPython against fake chip objects (the modules that actually talk to the radio cannot be
-imported off-badge at all).  Same rationale as meshcore_version.
+imported off-badge at all).
 
 Why this exists:
 
@@ -116,6 +116,9 @@ class _PolledAdapter:
     drivers, so they pass straight through.
     """
 
+    # send() waits for TX_DONE itself, so the caller must not blind-wait the airtime again.
+    blocking_send = True
+
     def __init__(self, chip):
         self._chip = chip
 
@@ -152,10 +155,21 @@ class _PolledAdapter:
         return self._chip.get_packet_status()
 
     def getRSSI(self):
-        return self._chip.rssi
+        """RSSI of the last received packet in dBm, from GetPacketStatus (the driver's own
+        `rssi` property is never filled in on the polled path)."""
+        v = self._chip.get_packet_status()
+        return -((v >> 16) & 0xFF) / 2
 
     def getSNR(self):
-        return self._chip.snr
+        """SNR of the last received packet in dB (signed quarter-dB in GetPacketStatus)."""
+        raw = (self._chip.get_packet_status() >> 8) & 0xFF
+        if raw > 127:
+            raw -= 256
+        return raw / 4
+
+    def getRssiInst(self):
+        """Instantaneous RSSI in dBm (GetRssiInst, 0x15): the noise floor while idle in RX."""
+        return -self._chip._radio._cmd("B", 0x15, n_read=2)[1] / 2
 
     def send(self, data):
         return self._chip.send(data)
@@ -175,10 +189,8 @@ class _PolledAdapter:
             self._chip.set_callback(callback)
 
     def setDio2AsRfSwitch(self, enable):
-        """No-op: upstream fixes this at construction (`dio2_rf_sw=False` on fri3d_2026,
-        which drives the RF switch from GPIO46 instead).  The board already passes that, so
-        there is nothing to do here -- but the call has to succeed, since bring-up makes it
-        unconditionally.
+        """No-op: the board fixes this at construction (`dio2_rf_sw`), and LoRaManager re-arms
+        it after a hardware reset, so there is nothing to do here.
         """
         return None
 
@@ -199,6 +211,9 @@ class _PolledAdapter:
         responsible for those, and this call only retunes the modem.
         """
         self._chip.configure(to_lora_cfg(kw))
+        # Image calibration for the band in use: configure() leaves the power-on 902-928 MHz
+        # calibration in place, which costs sensitivity at 868 MHz.
+        self._chip._radio.calibrate_image()
         return 0
 
 
@@ -240,7 +255,9 @@ def lock_holder():
     """Name of the app currently holding the radio, or None if unknown/unarbitrated."""
     try:
         from mpos import LoRaManager
-        return getattr(LoRaManager, "holder", None)
+        # LoRaManager.holder is an instance property, so read the class-level field it wraps.
+        h = getattr(LoRaManager, "_holder", None)
+        return h if isinstance(h, str) else None
     except Exception:
         return None
 
