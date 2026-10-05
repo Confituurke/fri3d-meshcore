@@ -13,6 +13,7 @@ import setup_activity
 import thread_activity
 from ui_tabs import Tab
 
+APP_NAME = "MicroPyMesh"
 VERSION = "0.1.0"
 
 
@@ -77,7 +78,8 @@ class SettingsTab(Tab):
 
         T.section_label(body, "About")
         card = self._card(body)
-        T.SettingRow(card, "Version", VERSION, first=True)
+        T.SettingRow(card, "App", APP_NAME, first=True)
+        T.SettingRow(card, "Version", VERSION)
         T.label(body, "MeshCore is a trademark of its owner.", 13, col=T.MUTED)
 
     _KINDS = (("channel", "Channel messages"), ("dm", "Direct messages"),

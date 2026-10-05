@@ -1,7 +1,7 @@
 """Long-running and failure cases: TX errors, the ticks wrap, an unset clock, packets
 still arriving when we want to transmit, and prefs writes that fail.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_robustness.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_robustness.py
 """
 
 import os
@@ -11,7 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_mpos  # noqa: E402
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 WRAP = 1 << 30
 
 

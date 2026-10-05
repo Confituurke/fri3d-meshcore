@@ -2,7 +2,7 @@
 other PNGs handed on as they are, a missing zoom level stretched from the nearest ancestor,
 and a store that loads the tiles a view asks for, most wanted first.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_map_tiles.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_map_tiles.py
 """
 
 import errno

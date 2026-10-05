@@ -16,7 +16,7 @@ from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                   "com.confituurke.meshcore", "fonts")
+                   "eu.axistem.micropymesh", "fonts")
 EXTRA = "·→×…−›°€‘’“”–—•≈"
 UNICODES = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + [ord(c) for c in EXTRA]
 

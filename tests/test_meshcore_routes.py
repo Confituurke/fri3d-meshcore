@@ -1,7 +1,7 @@
 """How a DM reaches a contact: auto (the learned direct path, else flood), flood (always),
 or a manual path typed as hex hops of the path hash size.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_routes.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_routes.py
 """
 
 import os

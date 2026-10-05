@@ -1,6 +1,6 @@
 """Receiving and transmitting through the polled SX126x driver (no DIO1 line).
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_polled_rx.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_polled_rx.py
 """
 
 import os

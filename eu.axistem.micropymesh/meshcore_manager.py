@@ -180,7 +180,7 @@ REINIT_BACKOFF_MAX_MS = 60000
 # Optional hashtag channel seeded into a fresh install alongside "Public" (None: Public only).
 DEFAULT_CHANNEL = None
 
-MESHCORE_APP = "com.confituurke.meshcore"
+MESHCORE_APP = "eu.axistem.micropymesh"
 NICKNAME_PREFS = MESHCORE_APP
 
 

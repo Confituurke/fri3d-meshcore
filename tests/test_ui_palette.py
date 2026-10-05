@@ -1,7 +1,7 @@
 """Colours of the app: by default MicroPythonOS's light or dark mode and its primary colour;
 the app's own setting can pin either. Text on accent fills stays readable whatever the accent.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_ui_palette.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_ui_palette.py
 """
 
 import os

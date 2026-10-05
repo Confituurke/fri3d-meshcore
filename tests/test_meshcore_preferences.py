@@ -2,7 +2,7 @@
 automatically per node type, a sound for messages that mention us, and the list of
 recently heard packets.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_preferences.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_preferences.py
 """
 
 import os
@@ -118,7 +118,7 @@ def test_max_hops_must_be_a_hop_count():
 
 def test_an_older_setting_without_the_main_switch_keeps_working():
     env, m = _setup()
-    env.prefs("com.confituurke.meshcore")["auto_add"] = {"chat": True, "rptr": True}
+    env.prefs("eu.axistem.micropymesh")["auto_add"] = {"chat": True, "rptr": True}
     cfg = fake_mpos.new_manager(env).auto_add_settings()
     _assert(cfg["enabled"] and not cfg["all"] and cfg["chat"] and cfg["rptr"], cfg)
 

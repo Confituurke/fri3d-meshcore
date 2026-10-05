@@ -1,6 +1,6 @@
 """TX scheduling: ACK delay, the direct-DM ACK rule and the reciprocal PATH return.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_tx_timing.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_tx_timing.py
 """
 
 import os

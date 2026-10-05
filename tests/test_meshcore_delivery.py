@@ -1,6 +1,6 @@
 """Delivery state of outgoing messages: on-air flag, repeater echoes, resend.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_delivery.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_delivery.py
 """
 
 import os

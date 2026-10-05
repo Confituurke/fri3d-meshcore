@@ -2,7 +2,7 @@
 telemetry, owner info), their replies, and trace. Layouts follow the MeshCore firmware
 (simple_repeater, simple_room_server, Mesh.cpp); integers are little-endian.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_server.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_server.py
 """
 
 import os

@@ -2,7 +2,7 @@
 messages, direct messages including room posts, adverts heard). Nothing for our own or
 repeated packets.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_sounds.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_sounds.py
 """
 
 import os
@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_mpos  # noqa: E402
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 
 
 def _assert(c, m=""):

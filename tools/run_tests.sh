@@ -3,7 +3,7 @@
 cd "$(dirname "$0")/.." || exit 1
 n=0
 for t in tests/test_*.py; do
-    PYTHONPATH=com.confituurke.meshcore python3 "$t" > /dev/null 2>&1 || { echo "FAIL $t"; PYTHONPATH=com.confituurke.meshcore python3 "$t" 2>&1 | tail -15; exit 1; }
+    PYTHONPATH=eu.axistem.micropymesh python3 "$t" > /dev/null 2>&1 || { echo "FAIL $t"; PYTHONPATH=eu.axistem.micropymesh python3 "$t" 2>&1 | tail -15; exit 1; }
     n=$((n + 1))
 done
 echo "$n test files passed"

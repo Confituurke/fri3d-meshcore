@@ -2,7 +2,7 @@
 included, with their position and when they were last heard) and the nodes heard by advert
 that are not contacts (the Nodes list and the map start from them after a reboot).
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_node_store.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_node_store.py
 """
 
 import os
@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_mpos  # noqa: E402
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 
 
 def _assert(c, m=""):

@@ -1,7 +1,7 @@
 """Our identity: exporting the key pair to a file (the SD card), and replacing it with a new
 one, which forgets everything derived from the old key.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_identity.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_identity.py
 """
 
 import json

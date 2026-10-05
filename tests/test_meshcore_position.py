@@ -2,7 +2,7 @@
 default; switched on without a GPS answering, it switches itself off again. The position goes
 into adverts only when sharing is on.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_position.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_position.py
 """
 
 import os

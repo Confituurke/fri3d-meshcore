@@ -2,7 +2,7 @@
 it too); removing a chat keeps the contact; a former contact's chat stays listed and saved,
 and it cannot be written to until it is a contact again.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_chats_contacts.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_chats_contacts.py
 """
 
 import os

@@ -1,6 +1,6 @@
 """The native meshcrypto dispatch in meshcore_crypto, and the manager's identity cache.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_crypto_native.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_crypto_native.py
 """
 
 import os

@@ -2,7 +2,7 @@
 and their replies, timeouts, ping and trace, and room posts. A fake server plays the
 firmware's side: it decrypts what we send and answers like simple_repeater/simple_room_server.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_sessions.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_sessions.py
 """
 
 import os

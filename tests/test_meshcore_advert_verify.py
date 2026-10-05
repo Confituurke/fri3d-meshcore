@@ -1,6 +1,6 @@
 """Advert handling: signature check, replay guard, node types and signal metadata.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_advert_verify.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_advert_verify.py
 """
 
 import os

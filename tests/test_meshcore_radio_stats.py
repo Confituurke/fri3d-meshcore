@@ -1,6 +1,6 @@
 """Radio statistics for the Radio tab: noise floor, packet rate, peak RSSI, TX airtime.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_radio_stats.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_radio_stats.py
 """
 
 import os

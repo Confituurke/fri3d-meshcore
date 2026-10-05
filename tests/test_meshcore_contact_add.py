@@ -1,7 +1,7 @@
 """Adding a contact by hand: a 64-hex public key, or a meshcore:// contact card (as the
 MeshCore apps share them).
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_contact_add.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_contact_add.py
 """
 
 import os

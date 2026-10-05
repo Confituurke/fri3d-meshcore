@@ -7,7 +7,7 @@
 set -e
 : "${MPOS_DIR:?set MPOS_DIR to a MicroPythonOS checkout with a unix build}"
 here=$(cd "$(dirname "$0")/.." && pwd)
-APP=com.confituurke.meshcore
+APP=eu.axistem.micropymesh
 
 ln -sfn "$here/$APP" "$MPOS_DIR/internal_filesystem/apps/$APP"
 exclude="$MPOS_DIR/.git/info/exclude"

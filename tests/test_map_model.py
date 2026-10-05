@@ -1,7 +1,7 @@
 """Map maths behind the Map tab (no LVGL): Web-Mercator pixels, the tiles a view needs, the
 ancestor tile to stretch where a zoom level is missing, fitting the nodes, pin positions.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_map_model.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_map_model.py
 """
 
 import os

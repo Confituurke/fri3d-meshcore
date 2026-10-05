@@ -1,6 +1,6 @@
 """App identity and Indicator defaults of the manager.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_manager_setup.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_manager_setup.py
 """
 
 import json
@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_mpos  # noqa: E402
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -53,6 +53,16 @@ def test_manifest_identity():
         man = json.load(f)
     _assert(man["fullname"] == APP, man["fullname"])
     _assert(man["version"] == "0.1.0", man["version"])
+    _assert(man["name"] == "MicroPyMesh", man["name"])
+
+
+def test_about_matches_manifest():
+    with open(os.path.join(ROOT, APP, "MANIFEST.JSON")) as f:
+        man = json.load(f)
+    with open(os.path.join(ROOT, APP, "tab_settings.py")) as f:
+        src = f.read()
+    _assert('APP_NAME = "%s"' % man["name"] in src, "APP_NAME")
+    _assert('VERSION = "%s"' % man["version"] in src, "VERSION")
 
 
 if __name__ == "__main__":

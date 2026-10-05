@@ -1,6 +1,6 @@
 """Pure view models behind the screens (no LVGL).
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_ui_model.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_ui_model.py
 """
 
 import calendar

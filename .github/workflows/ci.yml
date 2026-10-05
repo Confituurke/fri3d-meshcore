@@ -30,10 +30,10 @@ jobs:
           set -e
           for t in tests/test_*.py; do
             echo "── $t"
-            PYTHONPATH=com.confituurke.meshcore python3 "$t"
+            PYTHONPATH=eu.axistem.micropymesh python3 "$t"
           done
 
       # meshcore.py / meshcore_manager.py / meshcore_boot_service.py import lvgl and mpos, so
       # no test can import them: without this, a syntax error in the UI ships to users.
       - name: App bundle checks
-        run: python3 tools/check_app.py com.confituurke.meshcore --slug com.confituurke.meshcore
+        run: python3 tools/check_app.py eu.axistem.micropymesh --slug eu.axistem.micropymesh

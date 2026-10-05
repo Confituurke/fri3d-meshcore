@@ -4,7 +4,7 @@ import gc
 import sys
 import time
 
-APP_DIR = "/apps/com.confituurke.meshcore"
+APP_DIR = "/apps/eu.axistem.micropymesh"
 ROUNDS = 9           # report rounds
 INTERVAL_S = 10
 SEND = True          # zero-hop advert + one Public message after the first round

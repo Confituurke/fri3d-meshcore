@@ -1,6 +1,6 @@
 """Deleting one message, or a whole chat's history, from a channel or a DM; both are saved.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_message_actions.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_message_actions.py
 """
 
 import os

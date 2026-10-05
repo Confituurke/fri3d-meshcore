@@ -1,8 +1,9 @@
-# MeshCore for MicroPythonOS
+# MicroPyMesh
 
-A [MeshCore](https://meshcore.io/) LoRa messenger app for [MicroPythonOS](https://micropythonos.com)
-devices with a built-in SX1262 radio. It is laid out for 480×480 touch screens and developed
-on the Seeed SenseCAP Indicator D1L (ESP32-S3). The app id is **`com.confituurke.meshcore`**.
+**MicroPyMesh** is a [MeshCore](https://meshcore.io/) LoRa messenger app for
+[MicroPythonOS](https://micropythonos.com) devices with a built-in SX1262 radio. It is laid out
+for 480×480 touch screens and developed on the Seeed SenseCAP Indicator D1L (ESP32-S3). The
+app id is **`eu.axistem.micropymesh`**.
 It is based on [fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
 
 - **Chats:** Public, `#hashtag` and private channels; direct messages (X25519 + AES-128 + HMAC)
@@ -45,7 +46,7 @@ filter type 0 on every row decode fastest; other PNGs work too.
 ## Layout
 
 ```
-com.confituurke.meshcore/    # the app payload — exactly what ships in the .mpk
+eu.axistem.micropymesh/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
   icon_64x64.png
   main_activity.py           # main screen: Chats / Contacts / Map / Radio / Settings tabs
@@ -100,8 +101,8 @@ some boards.
 Run the desktop tests (the app directory goes on `PYTHONPATH`):
 
 ```
-for t in tests/test_*.py; do PYTHONPATH=com.confituurke.meshcore python3 "$t"; done
-python3 tools/check_app.py com.confituurke.meshcore --slug com.confituurke.meshcore
+for t in tests/test_*.py; do PYTHONPATH=eu.axistem.micropymesh python3 "$t"; done
+python3 tools/check_app.py eu.axistem.micropymesh --slug eu.axistem.micropymesh
 ```
 
 Both run in CI on every push (`.github/workflows/ci.yml`). The screen tests need a
@@ -114,7 +115,7 @@ MPOS_DIR=/path/to/MicroPythonOS tools/run_graphical.sh
 To build the package:
 
 ```
-python3 build_mpk.py          # -> com.confituurke.meshcore_<version>.mpk
+python3 build_mpk.py          # -> eu.axistem.micropymesh_<version>.mpk
 ```
 
 ## License & credits
@@ -134,7 +135,7 @@ The text font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarro
 Archivo Narrow Project Authors. The font for IDs and numbers is **Mesh Mono**, a subset of
 [IBM Plex Mono](https://github.com/IBM/plex) © IBM Corp., renamed because "Plex" is a Reserved
 Font Name. Both are used under the **SIL Open Font License 1.1**; the licences ship in
-`com.confituurke.meshcore/fonts/`.
+`eu.axistem.micropymesh/fonts/`.
 
 MESHCORE is a trademark of its owner. This is an independent, community-built client; it is not
 affiliated with or endorsed by the MeshCore project.

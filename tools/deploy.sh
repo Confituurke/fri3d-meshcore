@@ -9,7 +9,7 @@
 set -e
 cd "$(dirname "$0")/.."
 : "${HOST_IP:?set HOST_IP to this machine's address on the device's LAN}"
-APP=com.confituurke.meshcore
+APP=eu.axistem.micropymesh
 PORT=${PORT:-/dev/ttyUSB0}
 PY=${PYTHON:-python3}
 HTTP_PORT=${HTTP_PORT:-8765}

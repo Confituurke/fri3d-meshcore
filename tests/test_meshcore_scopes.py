@@ -2,7 +2,7 @@
 (1, 2 or 3 bytes); a scope makes them TRANSPORT_FLOOD with the region's transport code.
 Channel messages may override the default scope; everything else uses the default.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_scopes.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_scopes.py
 """
 
 import os

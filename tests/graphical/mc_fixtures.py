@@ -3,7 +3,7 @@ tools/run_graphical.sh). The manager runs in simulation mode on the desktop buil
 seed its state directly and record the calls the screens make."""
 import sys
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 APP_DIR = "apps/" + APP
 if APP_DIR not in sys.path:
     sys.path.append(APP_DIR)

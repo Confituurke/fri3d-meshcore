@@ -2,7 +2,7 @@
 a scoped flood carries HMAC-SHA256(key, payload type + payload)[:2] as its first transport
 code, so repeaters that know the region can tell it is theirs.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_region.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_region.py
 """
 
 import hashlib

@@ -1,6 +1,6 @@
 """Timestamps on the air are Unix time, also on ports whose epoch is 2000 (ESP32).
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_clock.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_clock.py
 """
 
 import os

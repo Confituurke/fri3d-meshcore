@@ -1,7 +1,7 @@
 """Contacts and discovered nodes: the Nodes tab lists the contacts (with what was last heard
 of them); every node heard is "discovered" until it is added, and can be forgotten.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_discovered.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_discovered.py
 """
 
 import os

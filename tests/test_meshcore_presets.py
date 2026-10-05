@@ -1,6 +1,6 @@
 """Radio presets, the firmware preamble rule and LoRa airtime.
 
-Run:  PYTHONPATH=com.confituurke.meshcore python3 tests/test_meshcore_presets.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_presets.py
 """
 
 import os
@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_mpos  # noqa: E402
 
-APP = "com.confituurke.meshcore"
+APP = "eu.axistem.micropymesh"
 
 
 def _assert(c, m=""):

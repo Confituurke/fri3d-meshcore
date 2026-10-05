@@ -8,7 +8,7 @@ import os
 import cairosvg
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                   "com.confituurke.meshcore", "icons")
+                   "eu.axistem.micropymesh", "icons")
 
 S = 'fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"'
 ICONS = {
