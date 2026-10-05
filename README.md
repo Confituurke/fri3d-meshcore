@@ -1,169 +1,141 @@
-# MeshCore for MicroPythonOS
+# MicroPyMesh
 
-A [MeshCore](https://meshcore.io/) LoRa mesh client for the Fri3d Camp 2026 badge
-(ESP32-S3 + Seeed Wio-SX1262), packaged as a [MicroPythonOS](https://micropythonos.com) app and
-published on [BadgeHub](https://badgehub.eu) as the **`org.fri3d.meshcore`** project.
+**MicroPyMesh** is a [MeshCore](https://meshcore.io/) LoRa messenger app for
+[MicroPythonOS](https://micropythonos.com) devices with a built-in SX1262 radio. It is laid out
+for 480×480 touch screens and developed on the Seeed SenseCAP Indicator D1L (ESP32-S3). The
+app id is **`eu.axistem.micropymesh`**.
+It is based on [fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
 
-- **Companions & contacts** — learns companion nodes from adverts; add one as a contact to chat.
-- **Public `#` channels** — send/receive group messages, interoperable with the MeshCore apps.
-- **Encrypted direct messages** — 1:1 messages (X25519 + AES-128 + HMAC) with delivery acks.
-- **Identity** — Ed25519 keypair (pure-Python, on-device), signed adverts, contact QR to share.
-- **Background radio service** — an on/off toggle in the Me tab runs the node in the background
-  (receive when the app is closed) and self-heals the radio; off = radio idle.
+- **Chats:** Public, `#hashtag` and private channels; direct messages (X25519 + AES-128 + HMAC)
+  with delivery acknowledgements and retries; room servers. Interoperable with the MeshCore apps.
+- **Contacts:** saved contacts and a list of discovered nodes (add with +); auto-add by type and
+  hop count; add by public key or `meshcore://` contact card.
+- **Routing:** per contact auto / flood / a typed path; path hash size 1, 2 or 3 bytes; region
+  scopes with a default and a per-channel override.
+- **Repeaters and rooms:** guest or admin login, status, neighbours, telemetry, ping, trace.
+- **Message details:** hops, the path with repeater names, SNR, RSSI, region, delivery.
+- **Map:** offline tiles from the SD card with pins for contacts, a discovered-nodes map, your
+  own position (typed, picked on the map, or from a GPS).
+- **Identity:** an on-device Ed25519 key pair and signed adverts; export, or a new identity.
+- **Look:** follows the system light or dark mode and accent colour, or the app's own choice.
+- **Background radio service:** keeps receiving while the app is closed, with sounds per kind.
 
-Wire-compatible with real MeshCore nodes. Protocol logic is pure-Python and unit-tested off-badge.
+Protocol logic is pure Python and unit-tested on the desktop.
 
 ## Requirements
 
-**Badge coprocessor (CH32) firmware 2.0.2 or newer**, which in practice means
-**MicroPythonOS 0.17.0 or newer** — the first release that ships a fixed coprocessor (2.0.3).
+**MicroPythonOS with a board that publishes its radio** as `LoRaManager.radioChip` (the polled
+SX126x driver). The board must also provide a reset hook (`LoRaManager.board_reset`).
 
-The SX1262's reset line is wired only to the CH32 coprocessor, not to the ESP32-S3, so the only
-way to hardware-reset a wedged radio is to write the CH32's config register twice — assert reset,
-then release it. Two consecutive I2C register writes is exactly the pattern that crashes CH32
-firmware 2.0.1: the badge black-screens, all further I2C returns `ENODEV`, and only a power-cycle
-recovers it ([MicroPythonOS#224](https://github.com/MicroPythonOS/MicroPythonOS/issues/224)). Since
-this app resets the radio on its recovery path, a badge that keeps losing the radio could
-black-screen itself. Fixed in badge firmware
-[v2.0.2](https://github.com/Fri3dCamp/badge_2026_fw/releases/tag/v2.0.2). MicroPythonOS installs
-whichever coprocessor firmware it carries automatically at boot: 0.16.1 carries the broken 2.0.1,
-and 0.17.0 is the first release carrying a fixed one (2.0.3).
+**The native `meshcrypto` module is recommended.** It makes signing and verification take
+milliseconds; without it the app falls back to pure-Python Ed25519/X25519, which takes seconds
+per operation on the device.
 
-**If OSUpdate says your badge is up to date on 0.16.1**, it is checking a stale mirror rather than
-telling you the truth. OSUpdate on 0.16.1 only ever queries `updates.micropythonos.com`, whose
-manifest still advertises 0.16.1; the alternate `updates.micropythonos.org` mirror is the one
-serving 0.17.0, and it is only consulted by 0.17.0 and later — which you cannot reach from 0.16.1.
-Until that is fixed upstream, update by flashing
-`https://updates.micropythonos.org/releases/esp32s3/MicroPythonOS_esp32s3_0.17.0.ota`, or install a
-[release build](https://github.com/MicroPythonOS/MicroPythonOS/releases) over USB.
+Optional, used when the OS offers them: `SDCardManager` (map tiles, identity export),
+`AudioManager` with a buzzer output (sounds), `GPSManager` with an NMEA source (own position),
+`AppearanceManager` (light/dark mode and accent colour). The app works without each of them.
 
-MeshCore checks `mpos.io_expander.version` at launch and shows a notice you have to acknowledge if
-the coprocessor is older — there is no manifest field for a minimum firmware version yet
-([MicroPythonOS#223](https://github.com/MicroPythonOS/MicroPythonOS/issues/223)), so the check has
-to happen at runtime. The app still runs on older firmware: the reset path is widely spaced,
-pauses LVGL's I2C traffic, and backs off exponentially when recovery keeps failing, which makes a
-crash unlikely — but the defect is in firmware and cannot be fixed from the app.
+## Map tiles
 
-**Upgrading with the radio service already on:** app updates keep your settings (only uninstalling
-clears them), so the first time this version runs on a badge with old coprocessor firmware it turns
-the background radio service **off** once, and says so. That happens at boot as well as on launch,
-since the boot service starts the radio headless with no UI to warn through. It is a one-time
-migration: turn the service back on from the Me tab and it stays on, on the assumption you have
-read the warning. Updating the OS is the real fix.
-
-Your coprocessor version is shown on the **Me** tab, and from the REPL:
-```python
-import mpos; print(mpos.io_expander.version)   # want (2, 0, 2) or newer
-```
+The map reads 256 px PNG tiles in the usual web-map layout from the SD card:
+`<SD>/maps/<style>/{z}/{x}/{y}.png`, one folder per style. `light` and `dark` follow the app's
+theme; any other folder can be picked in Settings › Appearance › Map. An optional
+`<style>/credit.txt` holds the attribution line shown on the map. 8-bit palette PNGs with
+filter type 0 on every row decode fastest; other PNGs work too.
 
 ## Layout
 
 ```
-org.fri3d.meshcore/          # the app payload — exactly what ships in the .mpk
+eu.axistem.micropymesh/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
-  icon_64x64.png            # the app icon (also what BadgeHub shows)
-  meshcore.py               # UI (activities)
-  meshcore_manager.py       # radio owner + background service (singleton)
-  meshcore_packet.py        # packet parse/serialize
-  meshcore_channel.py       # group-channel codec (AES-128 + HMAC)
-  meshcore_crypto.py        # Ed25519 / X25519 (pure-Python)
-  meshcore_advert.py        # advert parse/build + share URIs
-  meshcore_dm.py            # direct-message + ack codec
-  meshcore_version.py       # minimum badge firmware + version comparison
-  meshcore_boot_service.py  # boot_completed service (starts the radio if enabled)
-  fonts/                    # Archivo Narrow (OFL), the chat font — see below
-tests/                      # off-badge unit tests (desktop CPython)
-build_mpk.py                # build the .mpk locally (no external deps)
-.github/workflows/release.yml   # tag vX.Y.Z -> build + publish (via the marketplace actions)
+  icon_64x64.png
+  main_activity.py           # main screen: Chats / Contacts / Map / Radio / Settings tabs
+  tab_chats.py, tab_nodes.py, tab_map.py, tab_radio.py, tab_settings.py, ui_tabs.py
+  thread_activity.py         # channel and direct-message threads
+  node_activity.py           # node detail (login, status, neighbours, telemetry)
+  routing_pages.py           # routing, message details, path hash size, regions, scopes
+  quick_actions.py           # long-press menus
+  settings_pages.py          # settings sub-pages (name, location, identity, appearance, ...)
+  map_model.py, map_tiles.py, map_view.py   # map maths, tile decoding, the map widget
+  setup_activity.py          # first-run setup and radio preset choice
+  meshcore_manager.py        # radio owner + background service (singleton)
+  meshcore_packet.py         # packet parse/serialize
+  meshcore_channel.py        # group-channel codec (AES-128 + HMAC)
+  meshcore_crypto.py         # Ed25519 / X25519
+  meshcore_advert.py         # advert parse/build + share URIs
+  meshcore_dm.py             # direct-message + ack codec
+  meshcore_server.py         # repeater / room requests and replies
+  meshcore_region.py         # region scopes (transport codes)
+  meshcore_radio.py          # driver adapter + radio lock helpers
+  meshcore_presets.py        # radio presets and LoRa airtime
+  meshcore_boot_service.py   # boot_completed service (starts the radio if enabled)
+  ui_model.py                # what the screens show (pure Python, desktop-tested)
+  ui_theme.py                # widgets, fonts, shared styles, action sheets
+  ui_palette.py              # light and dark colours, accent
+  fonts/                     # Archivo Narrow + Mesh Mono (subset of IBM Plex Mono), OFL
+tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
+tests/graphical/             # screen tests on the MicroPythonOS desktop build (480x480)
+tools/check_app.py           # bundle checks (compiles, manifest, icon)
+tools/run_tests.sh           # the desktop test suite
+tools/make_fonts.py          # builds the subset fonts (needs fontTools)
+tools/run_graphical.sh       # run tests/graphical (MPOS_DIR = a MicroPythonOS checkout)
+tools/deploy.sh              # install the app on a device over Wi-Fi
+tools/repl_type.py, tools/screenshot.sh   # device helpers
+tools/engine_probe.py        # run the engine on a device without the UI
+build_mpk.py                 # build the .mpk locally (no external deps)
 ```
 
-## Install
+## Install for development
 
-**On the badge:** open the **AppStore** app and install **MeshCore**. After launching, enable
-**Me → Radio service** (off by default). Only one LoRa app can use the SX1262 at a time — turn
-this off before opening the LoRa Chat app.
+```
+HOST_IP=<this machine on the device's LAN> PYTHON=python3 tools/deploy.sh --start
+```
 
-**From source (development):**
-```
-mpremote connect /dev/ttyACM0 fs cp -r org.fri3d.meshcore :/apps/
-```
-then power-cycle.
+`deploy.sh` builds the `.mpk`, serves it briefly from this machine and types the install
+command into the device's REPL over USB serial (`tools/repl_type.py`, needs pyserial). The
+package itself travels over Wi-Fi, because bulk copies over a serial REPL are unreliable on
+some boards.
 
 ## Develop
 
-Run the off-badge tests (pure CPython, the app dir goes on `PYTHONPATH`):
-```
-for t in tests/test_*.py; do PYTHONPATH=org.fri3d.meshcore python3 "$t"; done
-python3 tools/check_app.py org.fri3d.meshcore --slug org.fri3d.meshcore
-```
-
-Both run in CI on every push (`.github/workflows/ci.yml`), and the release is gated on them.
-`check_app.py` covers what the tests cannot: `meshcore.py`, `meshcore_manager.py` and
-`meshcore_boot_service.py` import `lvgl`/`mpos`, so nothing off-badge can import them -- it
-compiles them, and checks the manifest's entrypoints/classnames, the icon, and that the
-fullname matches the folder (and the BadgeHub slug).
-
-Build the package locally:
-```
-python3 build_mpk.py          # -> org.fri3d.meshcore_<version>.mpk
-```
-
-## Release
-
-Releases are automated and **the git tag is the version** -- no files to edit. Pushing a
-`vX.Y.Z` tag runs `.github/workflows/release.yml`, which stamps `X.Y.Z` into `MANIFEST.JSON`,
-builds the `.mpk` with [`tjorim/mpos-package-mpk`](https://github.com/tjorim/mpos-package-mpk)
-and publishes it with
-[`tjorim/mpos-badgehub-publish`](https://github.com/tjorim/mpos-badgehub-publish).
+Run the desktop tests (the app directory goes on `PYTHONPATH`):
 
 ```
-git tag v0.4.5
-git push origin v0.4.5
+for t in tests/test_*.py; do PYTHONPATH=eu.axistem.micropymesh python3 "$t"; done
+python3 tools/check_app.py eu.axistem.micropymesh --slug eu.axistem.micropymesh
 ```
 
-Use a **new** version each time (BadgeHub can't republish an existing one).
+Both run in CI on every push (`.github/workflows/ci.yml`). The screen tests need a
+MicroPythonOS checkout with its unix build:
 
-`MANIFEST.JSON` is the **single source** for `name`, `short_description`, `long_description`,
-`publisher` and `version` -- the publish action reads them from there. Only BadgeHub-specific
-fields (categories, badges, license, git URL, icon) are workflow inputs.
-
-Two things that are easy to get wrong and fail silently:
-
-- **The BadgeHub slug must equal the app fullname** (`org.fri3d.meshcore`). The AppStore takes
-  the app's fullname *from the slug*, installs into `apps/<slug>`, and its unzipper rejects a
-  `.mpk` whose single top-level folder is anything else.
-- **The `.mpk` must be uploaded.** BadgeHub does not bundle one for you: the AppStore scans the
-  project's files for one with a `.mpk`/`.zip` extension and downloads *that*. Publishing only
-  the loose sources gives users "Download failed".
-
-The `BADGEHUB_API_TOKEN` repo secret must be a token for **this** project; mint one with
-`POST https://badgehub.eu/api/v3/projects/org.fri3d.meshcore/token` while logged in to
-badgehub.eu.
-
-Build the package locally (for sideloading):
 ```
-python3 build_mpk.py          # -> org.fri3d.meshcore_<version>.mpk
+MPOS_DIR=/path/to/MicroPythonOS tools/run_graphical.sh
+```
+
+To build the package:
+
+```
+python3 build_mpk.py          # -> eu.axistem.micropymesh_<version>.mpk
 ```
 
 ## License & credits
 
-MIT — © 2025 lucid-void. See [LICENSE](LICENSE).
+MIT — © 2025 lucid-void and contributors. See [LICENSE](LICENSE).
 
-Adapts / interoperates with these MIT-licensed works (full notices in
+Adapts, or interoperates with, these MIT-licensed works (full notices in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)):
 
-- **[python-pure25519](https://github.com/warner/python-pure25519)** © Brian Warner — Ed25519 math.
-- **[meshcore-pi](https://github.com/brianwiddas/meshcore-pi)** © Brian Widdas — X25519 + identity crypto, reference impl.
-- **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell — protocol / wire-format
-  reference, and the wordmark the app icon is derived from (see FAQ 7.4).
+- **[python-pure25519](https://github.com/warner/python-pure25519)** © Brian Warner: Ed25519 math.
+- **[meshcore-pi](https://github.com/brianwiddas/meshcore-pi)** © Brian Widdas: X25519 and identity
+  crypto, used as the reference implementation.
+- **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell: the protocol and wire-format
+  reference, and the wordmark the app icon is derived from.
 
-The chat font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
-Archivo Narrow Project Authors, used under the **SIL Open Font License 1.1** — not MIT (the
-licence ships with the font at `org.fri3d.meshcore/fonts/OFL.txt`, as the OFL requires). It is
-the upstream Regular, subset to Latin-1 so it costs 17 KB of badge flash instead of 91 KB, and
-it fits ~57 characters on a chat line where LVGL's built-in Montserrat fits 42.
+The text font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
+Archivo Narrow Project Authors. The font for IDs and numbers is **Mesh Mono**, a subset of
+[IBM Plex Mono](https://github.com/IBM/plex) © IBM Corp., renamed because "Plex" is a Reserved
+Font Name. Both are used under the **SIL Open Font License 1.1**; the licences ship in
+`eu.axistem.micropymesh/fonts/`.
 
 MESHCORE is a trademark of its owner. This is an independent, community-built client; it is not
 affiliated with or endorsed by the MeshCore project.
-
-The AES-128 fallback and all protocol codecs are original pure-Python implementations.

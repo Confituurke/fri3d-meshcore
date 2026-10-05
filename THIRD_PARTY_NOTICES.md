@@ -10,7 +10,7 @@ Copyright (c) 2015 Brian Warner and contributors
 https://github.com/warner/python-pure25519
 
 Ed25519 field/point arithmetic and EdDSA sign/verify are vendored and adapted (made
-pure-Python and MicroPython-compatible) in `org.fri3d.meshcore/meshcore_crypto.py`.
+pure-Python and MicroPython-compatible) in `eu.axistem.micropymesh/meshcore_crypto.py`.
 
 ## meshcore-pi
 Copyright (c) 2025 Brian Widdas
@@ -29,7 +29,7 @@ Used as the protocol / wire-format reference (packet header, group-channel and d
 crypto, advert layout, and the PATH/ACK acknowledgement format). No source code is copied; the
 interoperable wire format is re-implemented in pure Python from the specification and source.
 
-**The app icon** (`org.fri3d.meshcore/icon_64x64.png`) is derived from the official MeshCore
+**The app icon** (`eu.axistem.micropymesh/icon_64x64.png`) is derived from the official MeshCore
 wordmark, which ships in that MIT-licensed repository at `logo/meshcore.svg` and which the
 MeshCore FAQ (7.4) makes available for use. The letterforms are the original ones, sliced
 between the "H" and the "C" and stacked to fit a square icon; nothing was redrawn or
@@ -41,13 +41,25 @@ Copyright 2019 The Archivo Narrow Project Authors
 https://github.com/Omnibus-Type/ArchivoNarrow
 
 Licensed under the SIL Open Font License, Version 1.1 -- **not** the MIT License that covers
-the rest of this app. The full text ships with the font at
-`org.fri3d.meshcore/fonts/OFL.txt`, as the OFL requires.
+the rest of this app. The full text ships with the fonts at
+`eu.axistem.micropymesh/fonts/OFL.txt`, as the OFL requires.
 
-`org.fri3d.meshcore/fonts/ArchivoNarrow-Regular.ttf` is the upstream Regular (v3.002),
-subset to Latin-1 plus common punctuation so it costs 17 KB instead of 91 KB on badge flash.
-The OFL permits this: the font carries no Reserved Font Name, so the modified copy may keep
-the family name. It is bundled and rendered, never sold on its own.
+`ArchivoNarrow-Regular.ttf` and `ArchivoNarrow-SemiBold.ttf` are instances (weights 400 and
+600) of the upstream variable font, subset to Latin-1 plus a few symbols by
+`tools/make_fonts.py`. The font carries no Reserved Font Name, so the modified copies keep the
+family name. They are bundled and rendered, never sold on their own.
+
+## Mesh Mono (a subset of IBM Plex Mono)
+Copyright 2017 IBM Corp., with Reserved Font Name "Plex"
+https://github.com/IBM/plex
+
+Licensed under the SIL Open Font License, Version 1.1; the full text ships at
+`eu.axistem.micropymesh/fonts/OFL-IBMPlexMono.txt`.
+
+`MeshMono-Regular.ttf` is IBM Plex Mono Regular subset to Latin-1 plus a few symbols by
+`tools/make_fonts.py`. Because "Plex" is a Reserved Font Name, the modified font is renamed
+"Mesh Mono"; its copyright and trademark records are unchanged. IBM Plex is a trademark of
+IBM Corp.
 
 ---
 

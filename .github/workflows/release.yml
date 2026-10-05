@@ -6,7 +6,7 @@ name: Release to BadgeHub
 # them from there). Only BadgeHub-specific fields are inputs below.
 #
 # Requires the repo secret BADGEHUB_API_TOKEN: an API token for THIS project, minted with
-#   POST https://badgehub.eu/api/v3/projects/org.fri3d.meshcore/token   (while logged in)
+#   POST https://badgehub.eu/api/v3/projects/eu.axistem.micropymesh/token   (while logged in)
 
 on:
   push:
@@ -39,7 +39,7 @@ jobs:
       - name: Fail fast if this version is already published
         run: |
           published=$(curl -sf -H 'User-Agent: meshcore-ci' \
-            "https://badgehub.eu/api/v3/projects/org.fri3d.meshcore" \
+            "https://badgehub.eu/api/v3/projects/eu.axistem.micropymesh" \
             | python3 -c "import json,sys; print(json.load(sys.stdin)['version']['app_metadata']['version'])" \
             || echo "none")
           echo "currently published: $published, releasing: $VERSION"
@@ -51,7 +51,7 @@ jobs:
       - name: Stamp the tag version into the MANIFEST
         run: |
           set -e
-          f=org.fri3d.meshcore/MANIFEST.JSON
+          f=eu.axistem.micropymesh/MANIFEST.JSON
           sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VERSION"'\2/' "$f"
           python3 -c "import json; assert json.load(open('$f'))['version'] == '$VERSION', 'version not stamped into $f'"
           echo "stamped version $VERSION"
@@ -60,7 +60,7 @@ jobs:
         id: package
         uses: tjorim/mpos-package-mpk@v1.0.3
         with:
-          app-dir: org.fri3d.meshcore
+          app-dir: eu.axistem.micropymesh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -75,17 +75,17 @@ jobs:
       - name: Publish to BadgeHub
         uses: tjorim/mpos-badgehub-publish@v1.0.13
         with:
-          slug: org.fri3d.meshcore        # must equal the MANIFEST fullname: the AppStore
-          app-dir: org.fri3d.meshcore     # installs into apps/<slug> and rejects a .mpk whose
+          slug: eu.axistem.micropymesh        # must equal the MANIFEST fullname: the AppStore
+          app-dir: eu.axistem.micropymesh     # installs into apps/<slug> and rejects a .mpk whose
           icon: icon_64x64.png            # top-level folder is anything else
           mpk-path: ${{ steps.package.outputs.mpk-path }}
           api-token: ${{ secrets.BADGEHUB_API_TOKEN }}
           categories: Communication
           badges: mpos_api_0
           license-type: MIT
-          git-url: https://github.com/lucid-void/fri3d-meshcore
+          git-url: https://github.com/aXistem-dev/fri3d-meshcore
 
       # Publishing succeeds whether or not the thing a badge actually downloads is there: a
       # green release once shipped an app nobody could install. Ask the store, not the log.
       - name: Verify the release is installable
-        run: python3 tools/verify_release.py org.fri3d.meshcore "$VERSION"
+        run: python3 tools/verify_release.py eu.axistem.micropymesh "$VERSION"
