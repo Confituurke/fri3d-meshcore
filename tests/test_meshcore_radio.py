@@ -1,6 +1,6 @@
 """Desktop CPython tests for meshcore_radio.
 
-Run:  PYTHONPATH=org.fri3d.meshcore python3 tests/test_meshcore_radio.py
+Run:  PYTHONPATH=eu.axistem.micropymesh python3 tests/test_meshcore_radio.py
 
 The point of these is that the upstream-driver path (MicroPythonOS#229) cannot be exercised
 on a badge until MicroPythonOS actually ships it, and by then a mistranslated method name or
@@ -39,6 +39,9 @@ class FakeRadio:
 
     def sleep(self, warm_start=True):
         self.slept = warm_start
+
+    def calibrate_image(self):
+        pass
 
 
 class FakePolled:
@@ -141,10 +144,11 @@ def test_every_translated_method_reaches_its_snake_case_name():
                              "get_status", "get_packet_status"], polled.calls)
 
 
-def test_rssi_and_snr_are_properties_upstream_not_methods():
+def test_rssi_and_snr_decode_the_packet_status():
+    # GetPacketStatus = 0x112233: RssiPkt 0x11 (-raw/2 dBm), SnrPkt 0x22 (signed raw/4 dB).
     a = adapt(FakePolled())
-    _assert(a.getRSSI() == -42.0)
-    _assert(a.getSNR() == 7.5)
+    _assert(a.getRSSI() == -8.5, a.getRSSI())
+    _assert(a.getSNR() == 8.5, a.getSNR())
 
 
 def test_send_and_recv_keep_their_tuple_shape():
@@ -186,10 +190,10 @@ def test_unknown_attributes_fall_through_to_the_chip():
 
 # --- begin() / lora_cfg translation ------------------------------------------------ #
 
-# Mirrors MESHCORE_RADIO in meshcore_manager, which cannot be imported off-badge (it pulls
-# in machine/mpos). Keep in step with it -- a drift here detunes the radio silently.
+# The EU/UK Narrow begin() keywords, written out so a drift in meshcore_presets shows up
+# here -- a wrong value detunes the radio silently.
 MESHCORE_RADIO = dict(
-    freq=869.618, bw=62.5, sf=8, cr=8, syncWord=0x12, preambleLength=16,
+    freq=869.618, bw=62.5, sf=8, cr=8, syncWord=0x12, preambleLength=32,
     implicit=False, crcOn=True, tcxoVoltage=3.0,
     useRegulatorLDO=False, blocking=True, currentLimit=140.0, power=22,
 )
@@ -203,7 +207,7 @@ def test_to_lora_cfg_converts_units_and_names():
     _assert(cfg["bw"] == 62.5)          # kHz in both drivers
     _assert(cfg["coding_rate"] == 8)    # 4/8, denominator in both
     _assert(cfg["syncword"] == 0x12)
-    _assert(cfg["preamble_len"] == 16)
+    _assert(cfg["preamble_len"] == 32)
     _assert(cfg["output_power"] == 22)
 
 
@@ -240,7 +244,7 @@ def test_lock_calls_are_noops_without_the_framework():
 
 
 class _FakeLoRaManager:
-    holder = None
+    _holder = None
     _granted = True
     released = []
 
@@ -280,10 +284,10 @@ def test_lock_uses_the_framework_when_it_exposes_one():
 
         # Denied: another app holds the radio, and we must report who.
         _FakeLoRaManager._granted = False
-        _FakeLoRaManager.holder = "lora_chat"
+        _FakeLoRaManager._holder = "lora_chat"
         _assert(lock_acquire("meshcore") is False)
         _assert(lock_holder() == "lora_chat")
-        _FakeLoRaManager.holder = None
+        _FakeLoRaManager._holder = None
     _with_fake_mpos(body)
 
 
@@ -330,6 +334,14 @@ def _run_all():
         t()
         print("ok   %s" % t.__name__)
     print("\n%d/%d tests passed" % (len(tests), len(tests)))
+
+
+
+def test_default_preset_matches_the_written_out_keywords():
+    import meshcore_presets
+    kw = meshcore_presets.radio_kwargs(meshcore_presets.by_id("eu-narrow"))
+    for k in ("freq", "bw", "sf", "cr", "syncWord", "preambleLength", "power"):
+        _assert(kw[k] == MESHCORE_RADIO[k], (k, kw[k], MESHCORE_RADIO[k]))
 
 
 if __name__ == "__main__":

@@ -193,6 +193,21 @@ def test_bare_ack():
     _assert(dm.decode_ack(b"\x01\x02") is None)
 
 
+
+def test_build_path_return_roundtrip():
+    import meshcore_dm
+    secret = bytes(range(32))
+    pub = bytes([0x42]) + bytes(31)
+    payload = meshcore_dm.build_path_return(secret, 0x10, 0x42, b"\x11\x22", 2,
+                                            rand4=b"abcd")
+    _assert(payload[:2] == bytes([0x10, 0x42]))
+    dec = meshcore_dm.decode_path(payload, 0x10, [(pub, secret)])
+    _assert(dec is not None and dec["path"] == b"\x11\x22", dec)
+    _assert(dec["ack_hash"] is None)
+    mac = payload[2:2 + meshcore_dm.CIPHER_MAC_SIZE]
+    pt = meshcore_dm.mac_then_decrypt(secret, mac, payload[2 + meshcore_dm.CIPHER_MAC_SIZE:])
+    _assert(pt[3:8] == b"\xffabcd", pt)
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
