@@ -37,6 +37,28 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(type(page).__name__, "IdentityActivity")
         return act, page
 
+    def open_share(self):
+        act = mc_fixtures.open_app(tab="Settings")
+        act._tab._share_row.obj.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        page = top()
+        self.assertEqual(type(page).__name__, "ShareContactActivity")
+        return act, page
+
+    def test_share_contact_shows_the_contact_card_as_a_qr(self):
+        act, page = self.open_share()
+        pub, _ = self.m.get_identity()
+        self.assertEqual(page.uri, "meshcore://contact/add?name=Kim&public_key=%s&type=1"
+                         % pub.hex())
+        self.assertTrue(isinstance(page.qr, lv.qrcode))
+        self.assertEqual(page.name.get_text(), "Kim")
+
+    def test_share_contact_without_an_identity_says_so(self):
+        self.m.contact_uri = lambda: None
+        act, page = self.open_share()
+        self.assertIsNone(page.qr)
+        self.assertIn("No identity yet", page.note.get_text())
+
     def test_full_public_key_and_private_key_on_request(self):
         act, page = self.open_identity()
         pub, prv = self.m.get_identity()
