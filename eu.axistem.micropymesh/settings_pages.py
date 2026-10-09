@@ -1,5 +1,5 @@
-"""Settings sub-pages: the name, a new channel, the quick replies, our own position and the
-app's look."""
+"""Settings sub-pages: the name, our contact as a QR, a new channel, the quick replies, our own
+position and the app's look."""
 
 import lvgl as lv
 
@@ -462,6 +462,44 @@ class IdentityActivity(Activity):
     def onPause(self, screen):
         T.close_sheets()
         super().onPause(screen)
+
+
+class ShareContactActivity(Activity):
+    """Our meshcore:// contact card as a QR, for the MeshCore phone app to scan."""
+
+    QR_SIZE = 260
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        scr = T.make_screen()
+        T.HeaderSub(scr, "Share contact", back=self.finish)
+        body = T.scroll_area(scr, 14, 12)
+        body.set_style_pad_ver(12, lv.PART.MAIN)
+        body.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
+        self.uri = self.mgr.contact_uri()
+        self.qr = None
+        self.name = T.label(body, self.mgr.nickname(), 18, 600, emoji=True)
+        if self.uri:
+            # dark modules on white with a quiet zone, so it scans on any theme
+            frame = lv.obj(body)
+            frame.remove_style_all()
+            frame.set_size(lv.SIZE_CONTENT, lv.SIZE_CONTENT)
+            frame.set_style_bg_color(lv.color_white(), lv.PART.MAIN)
+            frame.set_style_bg_opa(lv.OPA.COVER, lv.PART.MAIN)
+            frame.set_style_radius(12, lv.PART.MAIN)
+            frame.set_style_pad_all(16, lv.PART.MAIN)
+            self.qr = lv.qrcode(frame)
+            self.qr.set_size(self.QR_SIZE)
+            self.qr.set_dark_color(lv.color_black())
+            self.qr.set_light_color(lv.color_white())
+            self.qr.update(self.uri, len(self.uri))
+            note = "Scan it in the MeshCore app to add this node as a contact."
+        else:
+            note = "No identity yet. Make one under Public key first."
+        self.note = T.label(body, note, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
+                            width=lv.pct(100))
+        self.note.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
+        self.setContentView(scr)
 
 
 class MaxHopsActivity(_FormActivity):

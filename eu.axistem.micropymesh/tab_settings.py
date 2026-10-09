@@ -35,6 +35,8 @@ class SettingsTab(Tab):
         self._key_row = T.SettingRow(card, "Public key",
                                      pub.hex()[:8].upper() + "\u2026" if pub else "\u2014",
                                      lambda: self._open(settings_pages.IdentityActivity))
+        self._share_row = T.SettingRow(card, "Share contact", "QR",
+                                       lambda: self._open(settings_pages.ShareContactActivity))
 
         T.section_label(body, "Radio")
         card = self._card(body)

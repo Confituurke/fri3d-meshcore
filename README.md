@@ -16,7 +16,8 @@ It is based on [fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by
 - **Message details:** hops, the path with repeater names, SNR, RSSI, region, delivery.
 - **Map:** offline tiles from the SD card with pins for contacts, a discovered-nodes map, your
   own position (typed, picked on the map, or from a GPS).
-- **Identity:** an on-device Ed25519 key pair and signed adverts; export, or a new identity.
+- **Identity:** an on-device Ed25519 key pair and signed adverts; your contact as a QR for the
+  MeshCore app to scan; export, or a new identity.
 - **Look:** follows the system light or dark mode and accent colour, or the app's own choice.
 - **Background radio service:** keeps receiving while the app is closed, with sounds per kind.
 
@@ -55,7 +56,7 @@ eu.axistem.micropymesh/    # the app payload — exactly what ships in the .mpk
   node_activity.py           # node detail (login, status, neighbours, telemetry)
   routing_pages.py           # routing, message details, path hash size, regions, scopes
   quick_actions.py           # long-press menus
-  settings_pages.py          # settings sub-pages (name, location, identity, appearance, ...)
+  settings_pages.py          # settings sub-pages (name, location, identity, contact QR, ...)
   map_model.py, map_tiles.py, map_view.py   # map maths, tile decoding, the map widget
   setup_activity.py          # first-run setup and radio preset choice
   meshcore_manager.py        # radio owner + background service (singleton)
