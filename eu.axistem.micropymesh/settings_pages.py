@@ -61,13 +61,20 @@ class AddChannelActivity(_FormActivity):
     title = "New channel"
 
     def build(self):
-        self._channel_name = self.field("Name", "", "#name, or a private channel name")
+        self._channel_name = self.field("Name", "", "#name, a private name, or a meshcore:// link")
         self._first = self._channel_name
-        self._channel_psk = self.field("Secret key (private channels only)", "", "base64")
+        self._channel_psk = self.field("Secret key (private channels only)", "",
+                                       "32 hex characters")
+        T.button(self.body, "Make a new key", self.new_key, kind="outline", h=48,
+                 width=lv.pct(100))
         self.hint("Without a key you join the hashtag channel of that name, shared by everyone "
-                  "who uses it. For a private channel, enter the key you were given.")
+                  "who uses it. For a private channel, enter the key you were given, or make "
+                  "a new one and share it from the channel's info.")
         self._channel_msg = self.hint("", T.FAIL_TEXT)
         T.button(self.body, "Add channel", self.add, width=lv.pct(100))
+
+    def new_key(self):
+        self._channel_psk.set_text(self.mgr.new_channel_key())
 
     def add(self):
         ok, err = self.mgr.add_channel(self._channel_name.get_text(), self._channel_psk.get_text())
@@ -464,21 +471,22 @@ class IdentityActivity(Activity):
         super().onPause(screen)
 
 
-class ShareContactActivity(Activity):
-    """Our meshcore:// contact card as a QR, for the MeshCore phone app to scan."""
+class _QRActivity(Activity):
+    """A meshcore:// link as a QR, for the MeshCore phone app to scan: `content()` gives
+    (title, name, link or None, note, note without a link)."""
 
     QR_SIZE = 260
 
     def onCreate(self):
         self.mgr = MeshCoreManager.get_instance()
+        title, name, self.uri, note, missing = self.content()
         scr = T.make_screen()
-        T.HeaderSub(scr, "Share contact", back=self.finish)
+        T.HeaderSub(scr, title, back=self.finish)
         body = T.scroll_area(scr, 14, 12)
         body.set_style_pad_ver(12, lv.PART.MAIN)
         body.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
-        self.uri = self.mgr.contact_uri()
         self.qr = None
-        self.name = T.label(body, self.mgr.nickname(), 18, 600, emoji=True)
+        self.name = T.label(body, name, 18, 600, emoji=True)
         if self.uri:
             # dark modules on white with a quiet zone, so it scans on any theme
             frame = lv.obj(body)
@@ -493,13 +501,31 @@ class ShareContactActivity(Activity):
             self.qr.set_dark_color(lv.color_black())
             self.qr.set_light_color(lv.color_white())
             self.qr.update(self.uri, len(self.uri))
-            note = "Scan it in the MeshCore app to add this node as a contact."
         else:
-            note = "No identity yet. Make one under Public key first."
+            note = missing
         self.note = T.label(body, note, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
                             width=lv.pct(100))
         self.note.set_style_text_align(lv.TEXT_ALIGN.CENTER, lv.PART.MAIN)
         self.setContentView(scr)
+
+
+class ShareContactActivity(_QRActivity):
+    """Our contact card, to add us as a contact."""
+
+    def content(self):
+        return ("Share contact", self.mgr.nickname(), self.mgr.contact_uri(),
+                "Scan it in the MeshCore app to add this node as a contact.",
+                "No identity yet. Make one under Public key first.")
+
+
+class ShareChannelActivity(_QRActivity):
+    """extras: channel. The channel's name and key, to join it."""
+
+    def content(self):
+        name = self.getIntent().extras.get("channel")
+        return ("Share channel", name, self.mgr.channel_uri(name),
+                "Scan it in the MeshCore app to join this channel.",
+                "This channel has a 256-bit key, which a QR cannot carry.")
 
 
 class MaxHopsActivity(_FormActivity):

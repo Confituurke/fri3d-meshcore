@@ -39,6 +39,44 @@ class TestSettingsMore(unittest.TestCase):
         wait_for_render(20)
         self.assertEqual(act._tab._advert_row.value.get_text(), "12 h · nearby 30 min")
 
+    def test_new_private_channel_with_a_made_key_and_its_qr(self):
+        from mpos import Intent
+        from mpos.activity_navigator import ActivityNavigator
+        import settings_pages
+        act = mc_fixtures.open_app(tab="Settings")
+        act._tab._open(settings_pages.AddChannelActivity)
+        wait_for_render(20)
+        page = top()
+        page.new_key()
+        key = page._channel_psk.get_text()
+        self.assertEqual(len(key), 32)
+        page._channel_name.set_text("Ops")
+        page.add()
+        wait_for_render(20)
+        self.assertEqual(self.m.channel_key_hex("Ops"), key)
+        act._tab.channel_info("Ops")
+        wait_for_render(20)
+        info = top()
+        self.assertEqual(info.key_row.value.get_text().replace(" ", ""), key)
+        info.share()
+        wait_for_render(20)
+        qr = top()
+        self.assertEqual(type(qr).__name__, "ShareChannelActivity")
+        self.assertEqual(qr.uri, "meshcore://channel/add?name=Ops&secret=" + key)
+        self.assertTrue(isinstance(qr.qr, lv.qrcode))
+
+    def test_join_a_channel_by_its_link(self):
+        import settings_pages
+        act = mc_fixtures.open_app(tab="Settings")
+        act._tab._open(settings_pages.AddChannelActivity)
+        wait_for_render(20)
+        page = top()
+        page._channel_name.set_text("meshcore://channel/add?name=Ops&secret="
+                                    "8b3387e9c5cdea6ac9e5edbaa115cd72")
+        page.add()
+        wait_for_render(20)
+        self.assertIsNotNone(self.m.get_channel("Ops"))
+
 
 if __name__ == "__main__":
     unittest.main()

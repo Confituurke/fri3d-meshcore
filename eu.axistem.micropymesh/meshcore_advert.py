@@ -183,24 +183,48 @@ def _url_unquote(s):
     return out.decode("utf-8")
 
 
-def _hex_key(text):
+def _hex_key(text, length=64):
     h = "".join(text.split()).lower()
-    if len(h) != 64 or any(c not in "0123456789abcdef" for c in h):
+    if len(h) != length or any(c not in "0123456789abcdef" for c in h):
         return None
     return h
+
+
+def _link_params(text, prefix):
+    """The query parameters of a meshcore:// link starting with `prefix`, else None."""
+    t = (text or "").strip()
+    if not t.startswith(prefix):
+        return None
+    params = {}
+    for part in t[len(prefix):].split("&"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            params[k] = v
+    return params
+
+
+def channel_share_uri(name, secret_hex):
+    """meshcore://channel/add link for a channel with a 16-byte key (MeshCore docs/qr_codes.md)."""
+    return "meshcore://channel/add?name=%s&secret=%s" % (_url_quote(name), secret_hex)
+
+
+def parse_channel_uri(text):
+    """(name, 32-hex secret) from a meshcore://channel/add link; None otherwise."""
+    params = _link_params(text, "meshcore://channel/add?")
+    if params is None or not params.get("name"):
+        return None
+    secret = _hex_key(params.get("secret", ""), 32)
+    if secret is None:
+        return None
+    return _url_unquote(params["name"]), secret
 
 
 def parse_contact_text(text):
     """(public key hex, name or None, node type) from a 64-hex key (spaces allowed) or a
     meshcore://contact/add?name=..&public_key=..&type=.. card; None otherwise."""
     t = (text or "").strip()
-    prefix = "meshcore://contact/add?"
-    if t.startswith(prefix):
-        params = {}
-        for part in t[len(prefix):].split("&"):
-            if "=" in part:
-                k, v = part.split("=", 1)
-                params[k] = v
+    params = _link_params(t, "meshcore://contact/add?")
+    if params is not None:
         key = _hex_key(params.get("public_key", ""))
         if key is None:
             return None

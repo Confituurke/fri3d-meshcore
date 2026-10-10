@@ -30,10 +30,11 @@ from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
                              PAYLOAD_TYPE_ADVERT, PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_PATH,
                              PAYLOAD_TYPE_ACK, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE,
                              PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE)
-from meshcore_channel import decode_group_text, encode_group_text, PUBLIC_CHANNEL, Channel
+from meshcore_channel import (decode_group_text, encode_group_text, PUBLIC_CHANNEL, Channel,
+                             psk_from_text)
 from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_message,
                              assemble_advert_payload, ADV_TYPE_CHAT, ADV_TYPE_ROOM, ADV_TYPE_NAMES,
-                             contact_share_uri)
+                             contact_share_uri, channel_share_uri, parse_channel_uri)
 # Import siblings at module load (while the app dir is on sys.path) and reference them by
 # attribute later. A lazy `from meshcore_crypto import ...` inside a function runs after the
 # app dir has left sys.path and fails on MicroPython ("no module named ..."); an attribute
@@ -894,9 +895,14 @@ class MeshCoreManager:
         except Exception as e:
             print("MeshCore: save channels error:", repr(e))
 
-    def add_channel(self, name, psk_b64=""):
+    def add_channel(self, name, psk=""):
+        """Join a channel: a #name (key from the name), a name with a key (32 hex or base64),
+        or a meshcore://channel/add link in `name`."""
         name = (name or "").strip()
-        psk_b64 = (psk_b64 or "").strip()
+        link = parse_channel_uri(name)
+        if link is not None:
+            name, psk = link
+        psk_b64 = psk_from_text(psk)
         if not name:
             return (False, "empty name")
         try:
@@ -916,6 +922,32 @@ class MeshCoreManager:
         self._save_channels()
         self._notify("channels", None)
         return (True, None)
+
+    def new_channel_key(self):
+        """A random 128-bit key for a new private channel, as 32 hex characters."""
+        import binascii
+        try:
+            import os
+            raw = os.urandom(16)
+        except Exception:
+            raw = bytes(self._rand_byte() for _ in range(16))
+        return binascii.hexlify(raw).decode()
+
+    def channel_key_hex(self, name):
+        """The channel's key in hex: 32 characters for a 128-bit key, else 64. None if unknown."""
+        ch = self.get_channel(name)
+        if ch is None:
+            return None
+        key = ch.secret[:16] if ch.secret[16:] == bytes(16) else ch.secret
+        import binascii
+        return binascii.hexlify(key).decode()
+
+    def channel_uri(self, name):
+        """meshcore://channel/add link to share the channel (128-bit keys only), else None."""
+        key = self.channel_key_hex(name)
+        if key is None or len(key) != 32:
+            return None
+        return channel_share_uri(name, key)
 
     def remove_channel(self, name):
         if name == PUBLIC_CHANNEL.name:

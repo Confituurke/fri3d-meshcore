@@ -232,6 +232,16 @@ def _derive_secret(psk_b64):
     return raw + b"\x00" * (32 - len(raw))
 
 
+def psk_from_text(text):
+    """A channel key as typed or pasted: 32 hex characters (as the MeshCore apps show it,
+    spaces allowed) or base64. Returns the base64 form, which is what is stored."""
+    h = "".join((text or "").split()).lower()
+    if len(h) == 32 and all(c in "0123456789abcdef" for c in h):
+        from binascii import unhexlify
+        return b2a_base64(unhexlify(h.encode())).decode().strip()
+    return (text or "").strip()
+
+
 def hashtag_secret(name):
     """Derive a MeshCore hashtag-channel 32-byte secret from its name.
 

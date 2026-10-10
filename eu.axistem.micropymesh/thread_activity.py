@@ -464,8 +464,10 @@ class ChannelInfoActivity(Activity):
         body = T.scroll_area(scr, 14, 10)
         info = T.card(body, filled=False, pad_ver=0, gap=0)
         T.SettingRow(info, "Kind", kind, first=True)
-        if ch is not None and getattr(ch, "psk_b64", None):
-            T.SettingRow(info, "Key", ch.psk_b64)
+        key = self.mgr.channel_key_hex(name)
+        if key:
+            self.key_row = T.SettingRow(info, "Key", " ".join(
+                key[i:i + 8] for i in range(0, len(key), 8)) if len(key) == 32 else key)
         if kind == "hashtag":
             hint = "Anyone who joins %s gets the same key from its name." % name
         elif kind == "private":
@@ -473,6 +475,8 @@ class ChannelInfoActivity(Activity):
         else:
             hint = "Public is the channel every MeshCore node listens to."
         T.label(body, hint, 15, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        if self.mgr.channel_uri(name):
+            T.button(body, "Share as QR", self.share, kind="outline", h=48, width=lv.pct(100))
         scope = T.card(body, filled=False, pad_ver=0, gap=0)
         self._scope_row = T.SettingRow(scope, "Region scope", self._scope_text(name),
                                        lambda: self.open_scope(name), first=True)
@@ -481,6 +485,12 @@ class ChannelInfoActivity(Activity):
                      h=52, width=lv.pct(100))
         self._name = name
         self.setContentView(scr)
+
+    def share(self):
+        import settings_pages
+        intent = Intent(activity_class=settings_pages.ShareChannelActivity)
+        intent.putExtra("channel", self._name)
+        self.startActivity(intent)
 
     def _scope_text(self, name):
         v = self.mgr.channel_scope(name)
