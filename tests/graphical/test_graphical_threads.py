@@ -174,6 +174,24 @@ class TestDayDividers(unittest.TestCase):
         act.refresh(scroll=False)
         self.assertEqual(labels(), ["Yesterday"], "a day without messages loses it")
 
+    def test_a_day_that_comes_back_gets_another_divider(self):
+        import meshcore_manager as mm
+        import ui_theme
+        now = mm.unix_time()
+        tz = ui_theme.tz_offset_s()
+        midnight = (now + tz) // 86400 * 86400 - tz
+        for ts in (midnight + 60, midnight - 3600, midnight + 120):   # a clock running late
+            self.m._add_message("Public", {"ts": ts, "sender": "Sam", "text": str(ts),
+                                           "incoming": True})
+        act = mc_fixtures.open_thread("channel", "Public")
+        kids = [act.list.get_child(i) for i in range(act.list.get_child_count())]
+        texts = []
+        for o in kids:
+            for text, div in act._days.values():
+                if div is o:
+                    texts.append(text)
+        self.assertEqual(texts, ["Today", "Yesterday", "Today"])
+
 
 class TestLinks(unittest.TestCase):
     def setUp(self):

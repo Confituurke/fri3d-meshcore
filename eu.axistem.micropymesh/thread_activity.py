@@ -134,7 +134,7 @@ class ThreadActivity(Activity):
         self._limit = PAGE
         self._earlier = None
         self._divider = None
-        self._days = {}               # local day number -> (label, divider)
+        self._days = {}               # id(first message of a day) -> (label, divider)
         scr = T.make_screen()
         self.build_header(scr)
         gap = 10 if self.pad_ver == 9 else 8
@@ -305,6 +305,32 @@ class ThreadActivity(Activity):
         self.list.clean()
         self.refresh(scroll=False)
 
+    def _place_days(self, msgs):
+        """A day divider above every message whose local day differs from the one before
+        it (clocks on the mesh disagree, so a day can come back)."""
+        now = unix_time()
+        want = {}
+        prev = None
+        for m in msgs:
+            day = ui_model.day_number(m.get("ts", 0), self._tz)
+            if day != prev:
+                want[id(m)] = (m, ui_model.day_text(m.get("ts", 0), now, self._tz))
+            prev = day
+        for k in list(self._days):
+            if k not in want or want[k][1] != self._days[k][0]:
+                self._days.pop(k)[1].delete()
+        for k, (m, text) in want.items():
+            if k not in self._days:
+                self._days[k] = (text, self._day_divider(text))
+            div = self._days[k][1]
+            target = self._bubbles[k].obj.get_index()
+            if self._divider is not None and self._divider.get_index() == target - 1:
+                target -= 1               # above the "New" line, not between it and the bubble
+            if div.get_index() < target:
+                target -= 1               # it leaves its place first
+            if div.get_index() != target:
+                div.move_to_index(target)
+
     def _day_divider(self, text):
         r = T.row(self.list, lv.pct(100), lv.SIZE_CONTENT, 0, lv.FLEX_ALIGN.CENTER)
         pill = T.row(r, lv.SIZE_CONTENT, 24, 0, lv.FLEX_ALIGN.CENTER)
@@ -335,20 +361,10 @@ class ThreadActivity(Activity):
         for k in list(self._bubbles):
             if k not in live:
                 self._bubbles.pop(k).obj.delete()
-        days = set(ui_model.day_number(m.get("ts", 0), self._tz) for m in msgs)
-        for d in list(self._days):
-            if d not in days:
-                self._days.pop(d)[1].delete()
-        now = unix_time()
         added = False
-        prev = None
         for i, m in enumerate(msgs):
             b = self._bubbles.get(id(m))
-            day = ui_model.day_number(m.get("ts", 0), self._tz)
             if b is None:
-                if day != prev and day not in self._days:
-                    text = ui_model.day_text(m.get("ts", 0), now, self._tz)
-                    self._days[day] = (text, self._day_divider(text))
                 if (self._new_divider_at and i == len(msgs) - self._new_divider_at
                         and self._divider is None):
                     self._divider = self._new_divider()
@@ -358,7 +374,7 @@ class ThreadActivity(Activity):
                 added = True
             else:
                 b.update()
-            prev = day
+        self._place_days(msgs)
         if added and scroll:
             self._scroll_to_end()
 
