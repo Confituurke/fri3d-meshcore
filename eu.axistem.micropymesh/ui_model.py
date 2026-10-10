@@ -279,7 +279,9 @@ def metres_between(lat1, lon1, lat2, lon2):
 
 
 def _located(n):
-    return n.get("lat") is not None and n.get("lon") is not None
+    """Has a position; 0, 0 is what nodes without one advertise (as on the map)."""
+    lat, lon = n.get("lat"), n.get("lon")
+    return lat is not None and lon is not None and not (lat == 0 and lon == 0)
 
 
 SORTS = (("heard", "Last heard"), ("name", "Name"), ("nearest", "Nearest"),

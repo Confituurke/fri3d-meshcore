@@ -109,5 +109,26 @@ def test_nothing_without_an_identity():
     _assert(_adverts(m) == [], _adverts(m))
 
 
+def test_switching_a_kind_on_counts_from_then():
+    env, m = _setup()
+    m.set_auto_advert(zero_hop_min=15)
+    _tick(env, m, 7 * 24 * HOUR)                 # a week of zero-hop adverts only
+    m._tx_queue[:] = []
+    m.set_auto_advert(flood_h=3)
+    _tick(env, m, 3 * HOUR + 1000)
+    _assert("flood" in _adverts(m), _adverts(m))
+
+
+def test_a_failing_advert_waits_for_the_next_interval():
+    env, m = _setup()
+    m.set_auto_advert(zero_hop_min=15)
+    calls = []
+    m.advertise = lambda flood=True: calls.append(flood) or (False, "sign failed")
+    _tick(env, m, 15 * MIN + 1000)
+    _tick(env, m, 1000)
+    _tick(env, m, 1000)
+    _assert(calls == [False], calls)
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

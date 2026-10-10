@@ -44,6 +44,7 @@ import meshcore_dm       # noqa: F401
 import meshcore_radio    # noqa: F401
 import meshcore_presets  # noqa: F401
 import meshcore_server   # noqa: F401
+import ui_model           # pure helpers (local time); the background service needs it too
 
 # begin() keywords for the default preset (EU/UK Narrow); bring-up uses the stored preset.
 MESHCORE_RADIO = meshcore_presets.radio_kwargs(
@@ -811,9 +812,14 @@ class MeshCoreManager:
 
     def set_auto_advert(self, flood_h=None, zero_hop_min=None):
         cur = self.auto_advert_settings()
+        now = self._now_ms()
         if flood_h in AUTO_ADVERT_FLOOD_H:
+            if flood_h and not cur["flood_h"]:
+                self._last_flood_ms = now     # switched on: count from now (ticks wrap)
             cur["flood_h"] = flood_h
         if zero_hop_min in AUTO_ADVERT_ZERO_HOP_MIN:
+            if zero_hop_min and not cur["zero_hop_min"]:
+                self._last_zero_hop_ms = now
             cur["zero_hop_min"] = zero_hop_min
         try:
             ed = self._editor()
@@ -833,10 +839,13 @@ class MeshCoreManager:
         if not (cfg["flood_h"] or cfg["zero_hop_min"]) or not self.has_identity():
             return
         now = self._now_ms()
+        # The timers move first, so an advert that fails waits for the next interval.
         if cfg["flood_h"] and tdiff(now, self._last_flood_ms) >= cfg["flood_h"] * 3600000:
+            self._last_flood_ms = self._last_zero_hop_ms = now
             self.advertise(flood=True)
         elif (cfg["zero_hop_min"]
               and tdiff(now, self._last_zero_hop_ms) >= cfg["zero_hop_min"] * 60000):
+            self._last_zero_hop_ms = now
             self.advertise(flood=False)
 
     # --- channel management ------------------------------------------------- #
@@ -2585,8 +2594,7 @@ class MeshCoreManager:
         try:
             import time
             import mpos.time
-            from ui_model import tz_offset
-            tz = tz_offset(mpos.time.localtime(), time.gmtime())
+            tz = ui_model.tz_offset(mpos.time.localtime(), time.gmtime())
         except Exception:
             pass
         return ((now + tz) // 60) % (24 * 60)
@@ -2722,6 +2730,8 @@ class MeshCoreManager:
         s = self.server_session(pubkey_hex)
         s["state"] = "pending"
         s["error"] = None
+        if not auto:
+            s["relogin_tried"] = False   # one automatic login again per login by hand
         self._server_send(pubkey_hex, contact, PAYLOAD_TYPE_ANON_REQ, payload,
                           {"kind": "login", "tag": None, "password": password,
                            "remember": remember, "auto": auto})
@@ -2840,7 +2850,7 @@ class MeshCoreManager:
         if secret is None or pub is None or self._route(contact)[0] != ROUTE_TYPE_DIRECT:
             return
         params = struct.pack("<I", contact.get("sync_since", 0) & 0xFFFFFFFF)
-        tag = self._timestamp(unique=True)
+        tag = self._timestamp()          # the room only refuses an older one; no flash write
         pt = struct.pack("<IB", tag & 0xFFFFFFFF, meshcore_server.REQ_KEEP_ALIVE) + params
         s["ka_ack"] = hashlib.sha256(pt + bytes(pub)).digest()[:4]
         payload = meshcore_server.build_request(secret, pub, int(pubkey_hex[:2], 16), tag,
@@ -2856,8 +2866,12 @@ class MeshCoreManager:
         return False
 
     def _relogin(self, pubkey_hex, s, why):
-        """Log in again by ourselves, once: with the remembered password, else as a guest."""
+        """Log in again by ourselves, once per login by hand: with the remembered password,
+        else as a guest."""
         s["relogin_tried"] = True
+        if not self.is_contact(pubkey_hex):
+            self._sessions.pop(pubkey_hex, None)
+            return
         self.login(pubkey_hex, None, auto=True)
         s["error"] = why + ", logging in again"
         self._notify("server", pubkey_hex)
@@ -2875,7 +2889,7 @@ class MeshCoreManager:
                 return False
             s.update(state="ok", role=r["role"], admin=r["admin"], permissions=r["permissions"],
                      server_ts=r["server_ts"], fw_level=r["fw_level"], pending=None, error=None,
-                     relogin_tried=False, ka_ack=None)
+                     ka_ack=None)
             room = (self._contacts.get(pubkey_hex) or {}).get("type") == ADV_TYPE_ROOM
             s["ka_ms"] = (r["keep_alive_s"] or (ROOM_KEEP_ALIVE_S if room else 0)) * 1000
             self._server_active(pubkey_hex)
@@ -2931,7 +2945,7 @@ class MeshCoreManager:
 
     def _server_tick(self):
         now = self._now_ms()
-        for pubkey_hex, s in self._sessions.items():
+        for pubkey_hex, s in list(self._sessions.items()):   # _relogin may drop one
             name = (self._contacts.get(pubkey_hex) or {}).get("name") or pubkey_hex[:8]
             p = s.get("pending")
             if p and tdiff(now, p["deadline"]) > 0:
@@ -2940,12 +2954,21 @@ class MeshCoreManager:
                 if p["kind"] == "login":
                     s["state"] = "failed"
                     if p.get("auto"):
-                        s["error"] = "%s has forgotten you: log in with the password" % name
-                elif s["state"] == "ok" and not s.get("relogin_tried"):
+                        s["error"] = ("no answer from %s: out of range, or it has forgotten "
+                                      "you (log in with the password)" % name)
+                elif (s["state"] == "ok" and not s.get("relogin_tried")
+                      and (self.remembered_password(pubkey_hex) or s.get("role") == "guest")):
+                    # never as a guest behind an admin's back
                     self._relogin(pubkey_hex, s, "no answer from %s" % name)
                     continue
                 self._notify("server", pubkey_hex)
             elif s["state"] == "ok" and s.get("ka_ms") and not p:
+                contact = self._contacts.get(pubkey_hex)
+                if contact is None or self._route(contact)[0] != ROUTE_TYPE_DIRECT:
+                    # no keep-alive without a direct route (a room answers only those), so
+                    # nothing to expire either: a flooded login every few minutes is no help
+                    s["last_activity"] = now
+                    continue
                 if tdiff(now, s["last_activity"]) > s["ka_ms"] * 5 // 2:
                     if not s.get("relogin_tried"):
                         self._relogin(pubkey_hex, s, "%s went quiet" % name)
@@ -3075,7 +3098,12 @@ class MeshCoreManager:
         self._save_history(pubkey_hex)   # persist per-contact chat history
 
     def get_dm_messages(self, pubkey_hex):
-        return list(self._dm_messages.get(pubkey_hex, []))
+        """A direct chat's messages; in a room, without the posts of blocked sender names."""
+        msgs = self._dm_messages.get(pubkey_hex, [])
+        names = self._block_store()["names"]
+        if not names or (self._contacts.get(pubkey_hex) or {}).get("type") != ADV_TYPE_ROOM:
+            return list(msgs)
+        return [x for x in msgs if not (x.get("incoming") and x.get("sender") in names)]
 
     # --- contacts (persisted) ---------------------------------------------- #
     def get_contacts(self):
@@ -3257,6 +3285,8 @@ class MeshCoreManager:
         c = self._contacts.pop(pubkey_hex, None)
         if c is None:
             return False
+        self._sessions.pop(pubkey_hex, None)
+        self._keep_password(pubkey_hex, None)
         if delete_chat or not self._dm_messages.get(pubkey_hex):
             self.remove_chat(pubkey_hex)
         else:

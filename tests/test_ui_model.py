@@ -550,5 +550,12 @@ def test_emoji_order_puts_the_common_ones_first():
     _assert(order([]) == [])
 
 
+def test_a_position_of_zero_zero_is_no_position():
+    now, nodes = _located_nodes()
+    nodes[2].update(lat=0.0, lon=0.0)
+    rows = _ui().node_rows(nodes, now, filt="located", here=(50.85, 4.35))
+    _assert([r["name"] for r in rows] == ["Zed", "Amy"], rows)
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

@@ -76,5 +76,15 @@ def test_the_block_list_is_kept():
     _assert(not m2.is_blocked_key("ab" * 32))
 
 
+def test_a_blocked_name_in_a_room():
+    env, m, played = _setup()
+    room = "7c" + "55" * 31
+    m.add_contact(room, "Gent BBS", 3)
+    m._add_dm(room, {"ts": 1790000000, "sender": "Spammer", "text": "old post", "incoming": True})
+    m._add_dm(room, {"ts": 1790000001, "sender": "Sam", "text": "hi", "incoming": True})
+    m.block_name("Spammer")
+    _assert(_texts(m.get_dm_messages(room)) == ["hi"], m.get_dm_messages(room))
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

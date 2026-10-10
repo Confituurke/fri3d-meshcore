@@ -69,5 +69,11 @@ def test_parse_channel_uri():
     _assert(parse_channel_uri("hello") is None)
 
 
+def test_a_256_bit_key_in_hex():
+    env, m = _setup()
+    _assert(m.add_channel("Big", "ab" * 32) == (True, None))
+    _assert(m.channel_key_hex("Big") == "ab" * 32)
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

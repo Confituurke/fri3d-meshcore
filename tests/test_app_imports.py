@@ -79,6 +79,17 @@ def test_lazy_imports_are_loaded_by_the_main_screen():
     _assert(not bad, bad)
 
 
+
+def test_lazy_imports_are_loaded_by_the_background_service():
+    # With "Receive in background" on, the service runs the engine without any screen.
+    loaded = _loaded_by("meshcore_boot_service")
+    # A notification opens its chat only once the screens are loaded (it falls back to none).
+    known = {("meshcore_manager", "thread_activity")}
+    bad = sorted((m, l) for m in loaded for l in _lazy_imports(m)
+                 if l not in loaded and l not in ENTRY_POINTS and (m, l) not in known)
+    _assert(not bad, bad)
+
+
 def test_event_callbacks_go_through_the_guard():
     # A callback that raises is never called again by this LVGL binding; T.on keeps it alive.
     bad = []

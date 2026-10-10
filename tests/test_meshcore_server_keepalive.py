@@ -137,7 +137,7 @@ def test_a_room_that_went_quiet_logs_in_again():
 
 # --- logging in again -------------------------------------------------------- #
 
-def test_a_request_without_answer_logs_in_again():
+def test_a_request_without_answer_logs_in_again_with_the_remembered_password():
     env, m, srv = _logged_in(password="hunter2")
     m.request_server(srv.hex, "status")
     srv.take()
@@ -153,7 +153,19 @@ def test_a_request_without_answer_logs_in_again():
     _assert("status" in m.server_session(srv.hex)["results"])
 
 
-def test_no_answer_to_that_login_means_the_server_forgot_us():
+def test_an_admin_login_is_never_quietly_made_a_guest_one():
+    env, m, srv = _logged_in(password="hunter2")
+    m.login(srv.hex, "hunter2", remember=False)
+    srv.answer_login()
+    m.request_server(srv.hex, "status")
+    srv.take()
+    _tick(env, m, 60000)
+    s = m.server_session(srv.hex)
+    _assert(s["state"] == "ok" and "no answer" in s["error"] and not s.get("pending"), s)
+    _assert(_kinds(srv) == [], "no guest login behind the admin's back")
+
+
+def test_no_answer_to_that_login_either():
     env, m, srv = _logged_in()
     m.request_server(srv.hex, "status")
     srv.take()
@@ -161,9 +173,58 @@ def test_no_answer_to_that_login_means_the_server_forgot_us():
     srv.take()
     _tick(env, m, 60000)                         # no answer to that either
     s = m.server_session(srv.hex)
-    _assert(s["state"] == "failed" and "forgotten" in s["error"], s)
+    _assert(s["state"] == "failed" and "forgotten" in s["error"] and "range" in s["error"], s)
     _tick(env, m, 60000)
     _assert(_kinds(srv) == [], "it tries once, not forever")
+
+
+def test_a_room_without_a_direct_route_is_left_alone():
+    env, m, srv = _logged_in(ROOM)
+    m.set_route(srv.hex, "flood")
+    for _ in range(10):
+        _tick(env, m, KEEP_ALIVE_MS)
+    _assert(_kinds(srv) == [], "no keep-alive and no flooded logins")
+    _assert(m.server_session(srv.hex)["state"] == "ok")
+
+
+def test_one_automatic_login_per_login_by_hand():
+    env, m, srv = _logged_in(ROOM)
+    for _ in range(3):
+        _tick(env, m, KEEP_ALIVE_MS)
+    sent = srv.take()
+    srv.login_reply([x for x in sent if x[0] == "login"][-1][2], False, 0)   # back in
+    for _ in range(6):
+        _tick(env, m, KEEP_ALIVE_MS)             # quiet again
+    _assert(all(k != "login" for k, _ in _kinds(srv)), "not a second time by itself")
+
+
+def test_keep_alives_do_not_write_the_clock_to_flash():
+    env, m, srv = _logged_in(ROOM)
+    writes = []
+    commit = m._commit
+    m._commit = lambda ed: (writes.append(1), commit(ed))
+    _tick(env, m, KEEP_ALIVE_MS)
+    _assert(any(k == "keep_alive" for k, _ in _kinds(srv)))
+    _assert(writes == [], writes)
+
+
+def test_removing_the_contact_ends_its_session_and_password():
+    env, m, srv = _logged_in(ROOM, password="hunter2")
+    m.remove_contact(srv.hex)
+    _assert(srv.hex not in m._sessions and m.remembered_password(srv.hex) is None)
+    for _ in range(5):
+        _tick(env, m, KEEP_ALIVE_MS)
+    _assert(not m.is_contact(srv.hex), "not brought back by a login")
+
+
+def test_a_session_whose_contact_went_is_dropped_while_ticking():
+    env, m, srv = _logged_in(ROOM)
+    m._contacts.pop(srv.hex)                     # gone some other way than remove_contact
+    m.server_session(srv.hex)["last_activity"] -= 10 * KEEP_ALIVE_MS
+    m._contacts[srv.hex] = {"pubkey": srv.hex, "type": ROOM, "path": b"\x3a", "path_raw": 1}
+    m.is_contact = lambda pk: False
+    _tick(env, m, 1000)
+    _assert(srv.hex not in m._sessions)
 
 
 if __name__ == "__main__":
