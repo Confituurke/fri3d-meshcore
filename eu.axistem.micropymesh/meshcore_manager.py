@@ -211,6 +211,7 @@ AUTO_ADVERT_ZERO_HOP_MIN = (0, 15, 30, 60, 120)  # automatic zero-hop advert: of
 AUTO_ADD_DEFAULTS = {"enabled": False, "all": False, "chat": False, "rptr": False, "room": False,
                      "sensor": False, "max_hops": None}
 MAX_HOPS = 64               # a flood path holds at most 64 hops
+ROOM_KEEP_ALIVE_S = 128     # rooms zero the login's suggested interval; the value it last held
 RECENT_MAX = 20                 # packets kept for the Radio tab's "recently heard" list
 RX_RATE_WINDOW_MS = 10 * 60 * 1000
 _KIND_SHORT = {PAYLOAD_TYPE_GRP_TXT: "GRP", 0x06: "GRP", PAYLOAD_TYPE_ADVERT: "ADV",
@@ -1953,6 +1954,8 @@ class MeshCoreManager:
         ack = meshcore_dm.decode_ack(pkt.payload)
         if ack is None:
             return False
+        if self._sessions and self._keep_alive_acked(ack):
+            return True
         return self._mark_delivered(ack, pkt.snr)
 
     def _note_echo(self, h):
@@ -2594,9 +2597,48 @@ class MeshCoreManager:
             self._sessions[pubkey_hex] = s
         return s
 
-    def login(self, pubkey_hex, password=""):
-        """Log in to a repeater or room server (blank password: guest). The reply, or a
-        timeout, arrives as a "server" event. Returns (ok, err) for the sending."""
+    def remembered_password(self, pubkey_hex):
+        """The password that last logged in to this server, if it was to be remembered."""
+        return self._passwords().get(pubkey_hex)
+
+    def _passwords(self):
+        pw = getattr(self, "_pw_cache", None)
+        if pw is None:
+            try:
+                from mpos import SharedPreferences
+                pw = SharedPreferences(NICKNAME_PREFS, filename="servers.json").get_dict(
+                    "passwords", {}) or {}
+            except Exception:
+                pw = {}
+            self._pw_cache = pw
+        return pw
+
+    def _keep_password(self, pubkey_hex, password):
+        """Store (or with None, drop) the password for this server."""
+        pw = dict(self._passwords())
+        if password is None:
+            if pubkey_hex not in pw:
+                return
+            pw.pop(pubkey_hex)
+        elif pw.get(pubkey_hex) == password:
+            return
+        else:
+            pw[pubkey_hex] = password
+        try:
+            ed = self._editor("servers.json")
+            ed.put_dict("passwords", pw)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: password store error:", repr(e))
+        self._pw_cache = pw
+
+    def login(self, pubkey_hex, password=None, remember=True, auto=False):
+        """Log in to a repeater or room server. password None: the remembered one, else
+        guest; "" is always guest. A password that works is remembered (remember=False
+        forgets it). The reply, or a timeout, arrives as a "server" event. Returns (ok, err)
+        for the sending. `auto`: a login the app makes by itself to get back in."""
+        if password is None:
+            password = self.remembered_password(pubkey_hex) or ""
         pub, _ = self.get_identity()
         if pub is None:
             return (False, "no identity")
@@ -2617,7 +2659,8 @@ class MeshCoreManager:
         s["state"] = "pending"
         s["error"] = None
         self._server_send(pubkey_hex, contact, PAYLOAD_TYPE_ANON_REQ, payload,
-                          {"kind": "login", "tag": None})
+                          {"kind": "login", "tag": None, "password": password,
+                           "remember": remember, "auto": auto})
         return (True, None)
 
     _REQUESTS = {"status": meshcore_server.REQ_GET_STATUS,
@@ -2686,13 +2729,16 @@ class MeshCoreManager:
         return tadd(self._now_ms(), ms + 3000)
 
     def _server_send(self, pubkey_hex, contact, ptype, payload, pending):
+        """Send to the server along its route; `pending` (None for a keep-alive) is what the
+        session then waits for."""
         route, path_raw, path = self._route(contact)
         pkt = MeshCorePacket(make_header(route, ptype), path_raw, path, payload)
         raw = pkt.to_bytes()
         hops = (path_raw & 63) if route == ROUTE_TYPE_DIRECT else None
-        pending["deadline"] = self._deadline(
-            meshcore_server.timeout_ms(self._time_on_air_ms(len(raw)), hops))
-        self.server_session(pubkey_hex)["pending"] = pending
+        if pending is not None:
+            pending["deadline"] = self._deadline(
+                meshcore_server.timeout_ms(self._time_on_air_ms(len(raw)), hops))
+            self.server_session(pubkey_hex)["pending"] = pending
         try:
             self._remember(pkt.packet_hash())
         except Exception:
@@ -2710,9 +2756,53 @@ class MeshCoreManager:
             return False
         return self._on_server_reply(got[0].hex(), got[1])
 
+    def _server_active(self, pubkey_hex):
+        """We heard from the server: the session is alive, the next keep-alive waits."""
+        s = self._sessions.get(pubkey_hex)
+        if s and s.get("ka_ms"):
+            now = self._now_ms()
+            s["last_activity"] = now
+            s["next_ping"] = tadd(now, s["ka_ms"])
+
+    def _send_keep_alive(self, pubkey_hex, s):
+        """REQ_TYPE_KEEP_ALIVE with our sync_since, direct only (a room answers only those);
+        its ACK proves the session is alive and lets the room push posts again."""
+        import hashlib
+        import struct
+        s["next_ping"] = tadd(self._now_ms(), s["ka_ms"])
+        contact = self._contacts.get(pubkey_hex)
+        pub, _ = self.get_identity()
+        secret = self._node_secret(contact) if contact else None
+        if secret is None or pub is None or self._route(contact)[0] != ROUTE_TYPE_DIRECT:
+            return
+        params = struct.pack("<I", contact.get("sync_since", 0) & 0xFFFFFFFF)
+        tag = self._timestamp(unique=True)
+        pt = struct.pack("<IB", tag & 0xFFFFFFFF, meshcore_server.REQ_KEEP_ALIVE) + params
+        s["ka_ack"] = hashlib.sha256(pt + bytes(pub)).digest()[:4]
+        payload = meshcore_server.build_request(secret, pub, int(pubkey_hex[:2], 16), tag,
+                                                meshcore_server.REQ_KEEP_ALIVE, params)
+        self._server_send(pubkey_hex, contact, PAYLOAD_TYPE_REQ, payload, None)
+
+    def _keep_alive_acked(self, ack):
+        for pubkey_hex, s in self._sessions.items():
+            if s.get("ka_ack") is not None and s["ka_ack"] == bytes(ack):
+                s["ka_ack"] = None
+                self._server_active(pubkey_hex)
+                return True
+        return False
+
+    def _relogin(self, pubkey_hex, s, why):
+        """Log in again by ourselves, once: with the remembered password, else as a guest."""
+        s["relogin_tried"] = True
+        self.login(pubkey_hex, None, auto=True)
+        s["error"] = why + ", logging in again"
+        self._notify("server", pubkey_hex)
+
     def _on_server_reply(self, pubkey_hex, plaintext):
         s = self._sessions.get(pubkey_hex)
         pending = s and s.get("pending")
+        if s:
+            self._server_active(pubkey_hex)
         if not pending:
             return False
         if pending["kind"] == "login":
@@ -2720,7 +2810,15 @@ class MeshCoreManager:
             if r is None:
                 return False
             s.update(state="ok", role=r["role"], admin=r["admin"], permissions=r["permissions"],
-                     server_ts=r["server_ts"], fw_level=r["fw_level"], pending=None, error=None)
+                     server_ts=r["server_ts"], fw_level=r["fw_level"], pending=None, error=None,
+                     relogin_tried=False, ka_ack=None)
+            room = (self._contacts.get(pubkey_hex) or {}).get("type") == ADV_TYPE_ROOM
+            s["ka_ms"] = (r["keep_alive_s"] or (ROOM_KEEP_ALIVE_S if room else 0)) * 1000
+            self._server_active(pubkey_hex)
+            if not pending["remember"]:
+                self._keep_password(pubkey_hex, None)
+            elif pending["password"]:
+                self._keep_password(pubkey_hex, pending["password"])
             self._note_heard_ts(r["server_ts"])
             self._notify("server", pubkey_hex)
             return True
@@ -2774,7 +2872,22 @@ class MeshCoreManager:
                 s["error"] = "no answer from %s" % name
                 if p["kind"] == "login":
                     s["state"] = "failed"
+                    if p.get("auto"):
+                        s["error"] = "%s has forgotten you: log in with the password" % name
+                elif s["state"] == "ok" and not s.get("relogin_tried"):
+                    self._relogin(pubkey_hex, s, "no answer from %s" % name)
+                    continue
                 self._notify("server", pubkey_hex)
+            elif s["state"] == "ok" and s.get("ka_ms") and not p:
+                if tdiff(now, s["last_activity"]) > s["ka_ms"] * 5 // 2:
+                    if not s.get("relogin_tried"):
+                        self._relogin(pubkey_hex, s, "%s went quiet" % name)
+                        continue
+                    s["state"] = "failed"
+                    s["error"] = "lost the session with %s" % name
+                    self._notify("server", pubkey_hex)
+                elif tdiff(now, s["next_ping"]) >= 0:
+                    self._send_keep_alive(pubkey_hex, s)
             t = s.get("trace")
             if t and tdiff(now, t["deadline"]) > 0:
                 s["trace"] = None
@@ -2789,6 +2902,7 @@ class MeshCoreManager:
         if len(core) < 9:
             return False
         room_hex = got["pubkey"].hex()
+        self._server_active(room_hex)
         prefix = core[5:9].hex()
         try:
             text = core[9:].decode("utf-8")

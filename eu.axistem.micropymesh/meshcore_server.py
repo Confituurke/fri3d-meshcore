@@ -41,15 +41,16 @@ def parse_login_reply(body):
     body = bytes(body)
     if len(body) >= 6 and body[4:6] == b"OK":
         return {"ok": True, "server_ts": struct.unpack("<I", body[:4])[0], "admin": False,
-                "permissions": 0, "role": "guest", "fw_level": 0}
+                "permissions": 0, "role": "guest", "fw_level": 0, "keep_alive_s": 0}
     if len(body) < 8 or body[4] != RESP_LOGIN_OK:
         return None
-    ts, _, _, flag, perms = struct.unpack("<IBBBB", body[:8])
+    ts, _, keep_alive, flag, perms = struct.unpack("<IBBBB", body[:8])
     role = _ROLES[perms & PERM_ROLE_MASK]
     if flag == 2:                  # room: guest (no permissions)
         role = "guest"
     return {"ok": True, "server_ts": ts, "admin": flag == 1, "permissions": perms,
-            "role": role, "fw_level": body[12] if len(body) > 12 else 0}
+            "role": role, "fw_level": body[12] if len(body) > 12 else 0,
+            "keep_alive_s": keep_alive * 16}    # 0 from current firmware (a legacy field)
 
 
 # --- requests ------------------------------------------------------------------ #

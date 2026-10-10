@@ -57,7 +57,9 @@ def test_login_reply():
     body = struct.pack("<IBBBB", 1790000005, 0, 0, 1, 3) + b"\x01\x02\x03\x04" + b"\x02"
     r = srv.parse_login_reply(body)
     _assert(r == {"ok": True, "server_ts": 1790000005, "admin": True, "permissions": 3,
-                  "role": "admin", "fw_level": 2}, r)
+                  "role": "admin", "fw_level": 2, "keep_alive_s": 0}, r)
+    old = srv.parse_login_reply(struct.pack("<IBBBB", 5, 0, 8, 0, 0) + bytes(5))
+    _assert(old["keep_alive_s"] == 128, old)    # older firmware: suggested interval / 16
     guest = srv.parse_login_reply(struct.pack("<IBBBB", 5, 0, 0, 2, 0) + bytes(5))
     _assert(guest["role"] == "guest" and not guest["admin"], guest)
     rw = srv.parse_login_reply(struct.pack("<IBBBB", 5, 0, 0, 0, 2) + bytes(5))

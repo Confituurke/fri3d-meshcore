@@ -248,6 +248,7 @@ def test_a_late_reply_does_not_land_on_a_newer_request():
     env.now_ms += 60000
     m._server_tick()
     _assert(m.server_session(srv.hex)["error"], "the first request timed out")
+    srv.answer_login()                                       # it logged in again by itself
     m.request_server(srv.hex, "neighbours")
     srv.take()
     srv.response(struct.pack("<I", old_tag) + STATUS)        # the late status reply
@@ -262,7 +263,7 @@ def test_request_timeout_reports_and_clears():
     env.now_ms += 60000
     m._server_tick()
     s = m.server_session(srv.hex)
-    _assert(s["pending"] is None and "no answer" in s["error"], s)
+    _assert("no answer" in s["error"] and s["pending"]["kind"] == "login", s)   # logs in again
 
 
 # --- ping and trace ---------------------------------------------------------- #

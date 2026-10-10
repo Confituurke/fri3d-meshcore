@@ -148,7 +148,7 @@ class NodeDetailActivity(Activity):
         if s.get("state") == "ok":
             self.mgr.request_server(self.pk, TABS[self.tab][1])
         else:
-            self.mgr.login(self.pk, "")
+            self.mgr.login(self.pk)      # the remembered password, else as a guest
         self.refresh()
 
     def admin_login(self):
@@ -238,13 +238,23 @@ class AdminLoginActivity(settings_pages._FormActivity):
 
     def build(self):
         self.pk = self.getIntent().extras.get("pubkey")
-        self._password = self.field("Password", "", "admin password")
+        saved = self.mgr.remembered_password(self.pk)
+        self._password = self.field("Password", saved or "", "admin password")
         self._password.set_password_mode(True)
         self._first = self._password
+        row = T.row(self.body, lv.pct(100), 48, 8)
+        T.label(row, "Remember password", 16).set_flex_grow(1)
+        self._remember = True
+        self.remember = T.switch(row, True, self.set_remember)
         self.hint("The admin password gives full access; any other password logs in as a "
-                  "guest where the node allows guests.")
+                  "guest where the node allows guests. A remembered password is also used "
+                  "by the login button on the node's page, and when the app logs in again "
+                  "by itself.")
         T.button(self.body, "Log in", self.login, width=lv.pct(100))
 
+    def set_remember(self, on):
+        self._remember = on
+
     def login(self):
-        self.mgr.login(self.pk, self._password.get_text())
+        self.mgr.login(self.pk, self._password.get_text(), remember=self._remember)
         self.finish()

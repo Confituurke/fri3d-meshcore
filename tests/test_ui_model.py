@@ -430,5 +430,15 @@ def test_quiet_text():
             t({"enabled": True, "start": 1410, "end": 420}))
 
 
+def test_login_line_while_logging_in_again():
+    ui = _ui()
+    s = {"state": "pending", "error": "no answer from Gent, logging in again",
+         "pending": {"kind": "login", "auto": True}}
+    _assert(ui.login_line(s) == ("no answer from Gent, logging in again", ui.WARN),
+            ui.login_line(s))
+    _assert(ui.login_line({"state": "pending", "pending": {"kind": "login"}})[0]
+            == "Logging in\u2026")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

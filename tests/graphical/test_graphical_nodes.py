@@ -204,7 +204,7 @@ class TestServerDetail(unittest.TestCase):
         self.assertIsNotNone(find_label_with_text(scr, "Not logged in"))
         self.assertTrue(click_label("Log in"))
         wait_for_render(5)
-        self.assertEqual(rec.calls[0][1], (mc_fixtures.GENT, ""))
+        self.assertEqual(rec.calls[0][1], (mc_fixtures.GENT,))   # remembered password or guest
 
     def test_status_tab(self):
         self._logged_in(status=STATUS)
@@ -257,7 +257,23 @@ class TestServerDetail(unittest.TestCase):
         self.assertTrue(click_label("Log in"))
         wait_for_render(20)
         self.assertEqual(rec.calls[0][1], (mc_fixtures.GENT, "hunter2"))
+        self.assertEqual(rec.calls[0][2], {"remember": True})
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "NodeDetailActivity")
+
+    def test_admin_login_offers_the_remembered_password(self):
+        self.m._keep_password(mc_fixtures.GENT, "hunter2")
+        rec = mc_fixtures.Recorder(self.m, "login", result=(True, None))
+        _open_detail(mc_fixtures.GENT)
+        self.assertTrue(click_label("Admin"))
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(page._password.get_text(), "hunter2")
+        self.assertTrue(page.remember.has_state(lv.STATE.CHECKED))
+        page.remember.remove_state(lv.STATE.CHECKED)
+        page.remember.send_event(lv.EVENT.VALUE_CHANGED, None)
+        page.login()
+        wait_for_render(20)
+        self.assertEqual(rec.calls[0][2], {"remember": False})
 
     def test_a_login_that_succeeds_fetches_the_tab(self):
         rec = mc_fixtures.Recorder(self.m, "request_server", result=(True, None))

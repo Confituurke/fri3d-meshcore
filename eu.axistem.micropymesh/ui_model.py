@@ -475,6 +475,8 @@ def login_line(session):
     """(text, colour) for the login row."""
     state = session.get("state")
     if state == "pending":
+        if (session.get("pending") or {}).get("auto") and session.get("error"):
+            return (session["error"], WARN)
         return ("Logging in\u2026", MUTED)
     if state == "ok":
         role = session.get("role") or "guest"
