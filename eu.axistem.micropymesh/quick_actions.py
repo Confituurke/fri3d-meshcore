@@ -132,6 +132,10 @@ def node_menu(activity, mgr, pk, discovered=False):
         actions.append(("Remove from favourites" if fav else "Add to favourites",
                         lambda: mgr.set_favourite(pk, not fav)))
         actions.append(("Sounds…", lambda: sounds_menu(mgr, pk, title)))
+        if mgr.is_blocked_key(pk):
+            actions.append(("Unblock", lambda: mgr.unblock_key(pk)))
+        else:
+            actions.append(("Block", lambda: mgr.block_key(pk, title), "danger"))
         actions.append(("Remove contact", lambda: ask_remove_contact(mgr, pk, title), "danger"))
     else:
         actions.append(("Add to contacts", lambda: mgr.add_contact(pk, node.get("name"),

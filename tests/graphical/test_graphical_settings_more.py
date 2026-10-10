@@ -95,6 +95,41 @@ class TestSettingsMore(unittest.TestCase):
         wait_for_render(20)
         self.assertEqual(act._tab._quiet_row.value.get_text(), "23:30\u201307:00")
 
+    def test_block_a_channel_sender_and_unblock_in_settings(self):
+        import ui_theme
+        mc_fixtures.seed_chats(self.m)
+        thread = mc_fixtures.open_thread("channel", "Public")
+        thread.message_menu(self.m.get_messages("Public")[0])
+        wait_for_render(10)
+        ui_theme.ActionSheet.shown[-1].rows["Block Sam"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertTrue(self.m.is_blocked_name("Sam"))
+        self.assertEqual(self.m.get_messages("Public"), [])
+        thread.finish()
+        wait_for_render(20)
+        act = mc_fixtures.open_app(tab="Settings")
+        self.assertEqual(act._tab._blocked_row.value.get_text(), "1")
+        tap(act._tab._blocked_row.obj)
+        page = top()
+        self.assertEqual(type(page).__name__, "BlockedActivity")
+        tap(page.unblock_buttons["Sam"])
+        self.assertFalse(self.m.is_blocked_name("Sam"))
+        self.assertEqual(len(self.m.get_messages("Public")), 2)
+
+    def test_block_a_contact_from_its_menu(self):
+        import ui_theme
+        mc_fixtures.seed_nodes(self.m)
+        self.m.add_contact(mc_fixtures.BOB, "Bob")
+        act = mc_fixtures.open_app(tab="Contacts")
+        act._tab.menu(mc_fixtures.BOB)
+        wait_for_render(10)
+        ui_theme.ActionSheet.shown[-1].rows["Block"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertTrue(self.m.is_blocked_key(mc_fixtures.BOB))
+        act._tab.menu(mc_fixtures.BOB)
+        wait_for_render(10)
+        self.assertIn("Unblock", ui_theme.ActionSheet.shown[-1].rows)
+
 
 if __name__ == "__main__":
     unittest.main()

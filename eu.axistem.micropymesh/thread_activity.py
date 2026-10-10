@@ -210,6 +210,9 @@ class ThreadActivity(Activity):
             actions.append(("Reply", lambda: self.reply(msg)))
         if not msg.get("incoming"):
             actions.append(("Send again", lambda: self.send_text(msg.get("text", ""))))
+        sender = msg.get("sender")
+        if msg.get("incoming") and self.show_sender() and sender:
+            actions.append(("Block %s" % sender, lambda: self.block(sender), "danger"))
         actions.append(("Delete", lambda: self.delete(msg), "danger"))
         title = ui_model.display(msg.get("text", ""))
         self.sheet = T.ActionSheet(title[:60], actions,
@@ -226,6 +229,11 @@ class ThreadActivity(Activity):
         self._ta.set_text("@[%s] " % (msg.get("sender") or "?"))
         self._ta.add_state(lv.STATE.FOCUSED)
         self._kb.set_textarea(self._ta)
+
+    def block(self, sender):
+        """Hide this sender's messages here and in every channel and room."""
+        self.mgr.block_name(sender)
+        self.refresh(scroll=False)
 
     def delete(self, msg):
         self.mgr.delete_message(self.key(), msg)

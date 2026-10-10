@@ -73,6 +73,8 @@ class SettingsTab(Tab):
         card = self._card(body)
         T.SettingRow(card, "Quick replies", None,
                      lambda: self._open(settings_pages.QuickRepliesActivity), first=True)
+        self._blocked_row = T.SettingRow(card, "Blocked", self._blocked_text(),
+                                         lambda: self._open(settings_pages.BlockedActivity))
 
         T.section_label(body, "Auto-add contacts")
         self._build_auto_add(body)
@@ -203,6 +205,10 @@ class SettingsTab(Tab):
         n = self.mgr.path_hash_size()
         return "%d byte%s" % (n, "" if n == 1 else "s")
 
+    def _blocked_text(self):
+        n = len(self.mgr.blocked())
+        return str(n) if n else "none"
+
     def _advert_text(self):
         return ui_model.auto_advert_text(self.mgr.auto_advert_settings())
 
@@ -251,6 +257,7 @@ class SettingsTab(Tab):
         self._hash_row.value.set_text(self._hash_text())
         self._regions_row.value.set_text(self._regions_text())
         self._advert_row.value.set_text(self._advert_text())
+        self._blocked_row.value.set_text(self._blocked_text())
         self._quiet_row.value.set_text(ui_model.quiet_text(self.mgr.quiet_hours()))
         self._show_auto(self.mgr.auto_add_settings())
         self._location_row.value.set_text(self._location_text())

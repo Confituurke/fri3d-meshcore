@@ -1,5 +1,5 @@
-"""Settings sub-pages: the name, our contact as a QR, a new channel, the quick replies, quiet
-hours, our own position and the app's look."""
+"""Settings sub-pages: the name, our contact as a QR, a new channel, the quick replies, the
+blocked senders, quiet hours, our own position and the app's look."""
 
 import lvgl as lv
 
@@ -526,6 +526,49 @@ class ShareChannelActivity(_QRActivity):
         return ("Share channel", name, self.mgr.channel_uri(name),
                 "Scan it in the MeshCore app to join this channel.",
                 "This channel has a 256-bit key, which a QR cannot carry.")
+
+
+class BlockedActivity(Activity):
+    """Blocked contacts and sender names, each with a button to unblock it."""
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        self.scr = T.make_screen()
+        self.build()
+        self.setContentView(self.scr)
+
+    def build(self):
+        T.HeaderSub(self.scr, "Blocked", back=self.finish)
+        body = T.scroll_area(self.scr, 14, 10)
+        body.set_style_pad_ver(8, lv.PART.MAIN)
+        self.unblock_buttons = {}
+        entries = self.mgr.blocked()
+        if entries:
+            card = T.card(body, filled=False, pad_ver=0, pad_hor=14, gap=0)
+            for i, e in enumerate(entries):
+                row = T.row(card, lv.pct(100), 56, 8)
+                if i:
+                    T.divider(row, lv.BORDER_SIDE.TOP)
+                text = T.column(row, 1, lv.SIZE_CONTENT, 2)
+                text.set_flex_grow(1)
+                T.label(text, e["label"], 16, long_mode=lv.label.LONG_MODE.DOTS,
+                        width=lv.pct(100), emoji=True)
+                T.label(text, "contact: direct messages" if e["kind"] == "key"
+                        else "name: channel messages and room posts", 13, col=T.MUTED)
+                self.unblock_buttons[e["value"]] = T.icon_button(
+                    row, "close", lambda e=e: self.unblock(e), 44, 44, T.MUTED)
+        T.label(body, "Nobody is blocked. Block someone from a message's or a contact's menu."
+                if not entries else "Their messages are not shown, counted or sounded. Direct "
+                "messages are still acknowledged, so the sender does not resend them.", 13,
+                col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+
+    def unblock(self, e):
+        if e["kind"] == "key":
+            self.mgr.unblock_key(e["value"])
+        else:
+            self.mgr.unblock_name(e["value"])
+        self.scr.clean()
+        self.build()
 
 
 class QuietHoursActivity(Activity):

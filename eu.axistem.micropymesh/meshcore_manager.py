@@ -1633,6 +1633,9 @@ class MeshCoreManager:
                              msg["ts"], window=CH_RESEND_WINDOW_S):
             print("MeshCore [%s] %s: (resend, already shown)" % (decoded["channel"], msg["sender"]))
             return True
+        if self.is_blocked_name(msg["sender"]):
+            print("MeshCore [%s] %s: (blocked)" % (decoded["channel"], msg["sender"]))
+            return True
         print("MeshCore [%s] %s: %s  (%s)" % (decoded["channel"], msg["sender"], msg["text"], meta))
         self._add_message(decoded["channel"], msg)
         self._bump_unread(decoded["channel"], mention=self._mentions_us(msg["text"]))
@@ -1725,6 +1728,8 @@ class MeshCoreManager:
         dup = self._dup_message(("dm", pub_hex, got["text"]), msg["ts"])
         if dup:
             print("MeshCore DM <%s>: (resend, already shown -- re-acking)" % name)
+        elif self.is_blocked_key(pub_hex):
+            print("MeshCore DM <%s>: (blocked -- acking only)" % name)
         else:
             print("MeshCore DM <%s>: %s  (%s)" % (name, msg["text"], meta))
             self._add_dm(pub_hex, msg)
@@ -2924,7 +2929,9 @@ class MeshCoreManager:
         msg = {"ts": got["timestamp"], "sender": author or prefix.upper(), "text": text,
                "snr": pkt.snr, "hops": self._hops(pkt), "rx_ms": self._now_ms(),
                "incoming": True, "author": prefix}
-        if not self._dup_message(("room", room_hex, prefix, text), msg["ts"]):
+        if self.is_blocked_name(msg["sender"]):
+            pass                          # blocked author: still acked below, never shown
+        elif not self._dup_message(("room", room_hex, prefix, text), msg["ts"]):
             self._add_dm(room_hex, msg)
             self._chime("dm", room_hex)
             self._bump_unread(room_hex)
@@ -3046,6 +3053,65 @@ class MeshCoreManager:
         out.sort(key=lambda n: n.get("seq", -1) if n.get("pubkey") in self._nodes else -1,
                  reverse=True)
         return out
+
+    # --- blocking --------------------------------------------------------------- #
+    def _block_store(self):
+        b = getattr(self, "_blocked_cache", None)
+        if b is None:
+            try:
+                from mpos import SharedPreferences
+                saved = SharedPreferences(NICKNAME_PREFS).get_dict("blocked", {}) or {}
+            except Exception:
+                saved = {}
+            b = {"keys": dict(saved.get("keys") or {}), "names": list(saved.get("names") or [])}
+            self._blocked_cache = b
+        return b
+
+    def _save_blocked(self, b):
+        self._blocked_cache = b
+        try:
+            ed = self._editor()
+            ed.put_dict("blocked", b)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: block list error:", repr(e))
+        self._notify("contacts", None)
+
+    def blocked(self):
+        """[{kind: key|name, value, label}]: blocked contacts, then blocked sender names."""
+        b = self._block_store()
+        return ([{"kind": "key", "value": k, "label": v} for k, v in b["keys"].items()] +
+                [{"kind": "name", "value": n, "label": n} for n in b["names"]])
+
+    def is_blocked_key(self, pubkey_hex):
+        return pubkey_hex in self._block_store()["keys"]
+
+    def is_blocked_name(self, name):
+        return name in self._block_store()["names"]
+
+    def block_key(self, pubkey_hex, label=None):
+        """Hide the direct messages of this node (they are still acknowledged)."""
+        b = self._block_store()
+        b["keys"][pubkey_hex] = label or self.chat_name(pubkey_hex)
+        self._save_blocked(b)
+
+    def unblock_key(self, pubkey_hex):
+        b = self._block_store()
+        if b["keys"].pop(pubkey_hex, None) is not None:
+            self._save_blocked(b)
+
+    def block_name(self, name):
+        """Hide channel messages and room posts from this sender name."""
+        b = self._block_store()
+        if name and name not in b["names"]:
+            b["names"].append(name)
+            self._save_blocked(b)
+
+    def unblock_name(self, name):
+        b = self._block_store()
+        if name in b["names"]:
+            b["names"].remove(name)
+            self._save_blocked(b)
 
     def is_favourite(self, pubkey_hex):
         return bool((self._contacts.get(pubkey_hex) or {}).get("fav"))
@@ -3682,7 +3748,12 @@ class MeshCoreManager:
         return None
 
     def get_messages(self, channel_name):
-        return list(self._messages.get(channel_name, []))
+        """The channel's messages, without those of blocked sender names."""
+        names = self._block_store()["names"]
+        msgs = self._messages.get(channel_name, [])
+        if not names:
+            return list(msgs)
+        return [x for x in msgs if not (x.get("incoming") and x.get("sender") in names)]
 
     def get_packets(self):
         return list(self._packets)

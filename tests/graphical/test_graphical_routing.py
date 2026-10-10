@@ -68,7 +68,7 @@ class TestRouting(unittest.TestCase):
         bubble = [b for b in act._bubbles.values() if b.msg is msg][0]
         bubble.bubble.send_event(lv.EVENT.LONG_PRESSED, None)
         wait_for_render(5)
-        self.assertEqual(sorted(act.sheet.rows), ["Delete", "Details", "Reply"])
+        self.assertEqual(sorted(act.sheet.rows), ["Block Sam", "Delete", "Details", "Reply"])
         sheet_click(act.sheet, "Details")
         page = top()
         self.assertEqual(type(page).__name__, "MessageDetailsActivity")
