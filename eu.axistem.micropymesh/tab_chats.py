@@ -26,6 +26,7 @@ class ChatsTab(Tab):
         header = T.HeaderTop(parent, "Chats", pad_right=4, gap=8)
         T.preset_pill(header.obj, meshcore_presets.short_name(self.mgr.radio_preset()),
                       lambda: activity.select(2))
+        self.read_all = T.icon_button(header.obj, "check", self.mark_all_read)
         T.icon_button(header.obj, "plus", self.new_chat)
         bar = T.chip_bar(parent, 8)
         self._chips = {}
@@ -49,6 +50,11 @@ class ChatsTab(Tab):
             ("Discovered nodes", lambda: self._open(tab_nodes.DiscoveredActivity)),
         ], "Start a chat, join a channel or add someone")
 
+    def mark_all_read(self):
+        """The tick in the header (shown while anything is unread): every chat read."""
+        self.mgr.mark_all_read()
+        self.refresh()
+
     def _open(self, cls):
         self.activity.startActivity(Intent(activity_class=cls))
 
@@ -69,6 +75,10 @@ class ChatsTab(Tab):
         model = ui_model.chat_rows(self.mgr, unix_time(), self.filt, T.tz_offset_s())
         unread = len(ui_model.chat_rows(self.mgr, 0, "unread"))
         self._chips["unread"].set_text("Unread %d" % unread if unread else "Unread")
+        if unread:
+            self.read_all.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self.read_all.add_flag(lv.obj.FLAG.HIDDEN)
         keep = set(r["key"] for r in model)
         for key in list(self._rows):
             if key not in keep:

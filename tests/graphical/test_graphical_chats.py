@@ -26,6 +26,16 @@ class TestChats(unittest.TestCase):
         self.assertEqual(rows[mc_fixtures.ALEX].line2.get_text(), "You: see you at three")
         self.assertIsNotNone(find_label_with_text(lv.screen_active(), "Unread 1"))
 
+    def test_mark_all_as_read(self):
+        act = mc_fixtures.open_app()
+        button = act._tab.read_all
+        self.assertFalse(button.has_flag(lv.obj.FLAG.HIDDEN))
+        button.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(self.m.get_unread("Public"), 0)
+        self.assertTrue(act._tab._rows["Public"].badge.obj.has_flag(lv.obj.FLAG.HIDDEN))
+        self.assertTrue(button.has_flag(lv.obj.FLAG.HIDDEN), "nothing left to mark")
+
     def test_filter_direct_hides_channels(self):
         act = mc_fixtures.open_app()
         self.assertTrue(click_label("Direct"))

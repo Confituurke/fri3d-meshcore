@@ -1670,6 +1670,17 @@ class MeshCoreManager:
                 self._flush_dirty()
             self._notify("unread", key)
 
+    def mark_all_read(self):
+        """Every chat read: no unread counts or mentions left."""
+        if not self._unread and not self._mentions:
+            return
+        self._unread.clear()
+        self._mentions.clear()
+        self._unread_dirty = True
+        if not self._worker_running:
+            self._flush_dirty()
+        self._notify("unread", None)
+
     # --- direct messages (1:1, X25519) ------------------------------------- #
     def _node_secret(self, node):
         """Return (and cache on the node) the 32-byte X25519 shared secret with a node.

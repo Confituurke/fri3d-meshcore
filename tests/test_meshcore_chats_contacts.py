@@ -117,5 +117,15 @@ def test_favourites_are_kept_and_only_for_contacts():
     _assert(not _restart(env).is_favourite(pk))
 
 
+def test_mark_all_as_read():
+    env, m, pk = _setup()
+    m._bump_unread(pk)
+    m._bump_unread("Public", mention=True)
+    m.mark_all_read()
+    _assert(m.get_unread(pk) == 0 and m.get_unread("Public") == 0 and not m.get_mention("Public"))
+    m2 = _restart(env)
+    _assert(m2.get_unread(pk) == 0 and m2.get_unread("Public") == 0, "kept")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())
