@@ -165,7 +165,14 @@ class ThreadActivity(Activity):
         T.divider(bar, lv.BORDER_SIDE.TOP)
         bar.set_style_pad_left(12, lv.PART.MAIN)
         bar.set_style_pad_right(8, lv.PART.MAIN)
+        self.emoji_button = T.box(bar, 40, 44)
+        smiley = lv.label(self.emoji_button)
+        smiley.set_text("\U0001F642")
+        smiley.set_style_text_font(T.font(24, emoji=True), lv.PART.MAIN)
+        smiley.center()
+        T.clickable(self.emoji_button, self.pick_emoji)
         self._ta = T.text_input(bar, "", self.placeholder(), 1)
+        self._ta.set_style_text_font(T.font(17, emoji=True), lv.PART.MAIN)
         self._ta.set_flex_grow(1)
         T.on(self._ta, lv.EVENT.VALUE_CHANGED, lambda e: self._update_counter())
         self._counter = T.label(bar, "", 12, mono=True, col=T.MUTED)
@@ -177,6 +184,13 @@ class ThreadActivity(Activity):
         self._update_counter()
 
     # --- behaviour ------------------------------------------------------- #
+    def pick_emoji(self):
+        self.sheet = T.EmojiPicker(self._add_emoji)
+
+    def _add_emoji(self, e):
+        self._ta.add_text(e)
+        self._update_counter()
+
     def _update_counter(self):
         text = self._ta.get_text()
         left = self.budget(text)

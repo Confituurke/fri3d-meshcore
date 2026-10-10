@@ -826,3 +826,26 @@ def link_text(link, known):
         name = link["name"]
     verb = "Open" if known else ("Add" if kind == "contact" else "Join")
     return "%s %s" % (verb, name)
+
+
+# --- emoji picker ------------------------------------------------------------------ #
+
+# Offered first when the system has them: replies and mesh talk.
+COMMON_EMOJI = ("\U0001F44D", "\u2764", "\U0001F602", "\U0001F60A", "\U0001F642",
+                "\U0001F62E", "\U0001F622", "\U0001F64F", "\U0001F44B", "\U0001F389",
+                "\U0001F525", "\u2705", "\U0001F4E1", "\U0001F4CD")
+
+
+def emoji_order(available):
+    """The picker's emoji: the common ones the system has first, then the rest as given.
+    A trailing emoji variation selector does not count when matching."""
+    bare = lambda e: e.replace("\ufe0f", "")
+    out = []
+    taken = set()
+    for c in COMMON_EMOJI:
+        for e in available:
+            if bare(e) == c and e not in taken:
+                out.append(e)
+                taken.add(e)
+                break
+    return out + [e for e in available if e not in taken]

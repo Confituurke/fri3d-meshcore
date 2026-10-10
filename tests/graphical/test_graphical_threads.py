@@ -243,5 +243,34 @@ class TestLinks(unittest.TestCase):
         self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "DMChatActivity")
 
 
+class TestEmojiPicker(unittest.TestCase):
+    def setUp(self):
+        self.m = mc_fixtures.fresh_manager()
+        mc_fixtures.seed_chats(self.m)
+
+    def tearDown(self):
+        import ui_theme
+        ui_theme.close_sheets()
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+
+    def test_pick_emoji_into_the_message(self):
+        import ui_theme
+        act = mc_fixtures.open_thread("dm", mc_fixtures.ALEX)
+        act._ta.set_text("hi ")
+        act.emoji_button.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        picker = ui_theme.ActionSheet.shown[-1]
+        self.assertEqual(type(picker).__name__, "EmojiPicker")
+        self.assertTrue(len(picker.cells) > 20, len(picker.cells))
+        first = picker.order[0]
+        picker.cells[first].send_event(lv.EVENT.CLICKED, None)
+        picker.cells[first].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(act._ta.get_text(), "hi " + first + first)
+        self.assertIn(picker, ui_theme.ActionSheet.shown, "stays open for more")
+        self.assertIn("left", act._counter.get_text())
+
+
 if __name__ == "__main__":
     unittest.main()

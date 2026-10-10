@@ -543,5 +543,12 @@ def test_link_text():
     _assert(t({"kind": "map", "lat": 50.8503, "lon": 4.3517}, False) == "Map 50.8503, 4.3517")
 
 
+def test_emoji_order_puts_the_common_ones_first():
+    order = _ui().emoji_order
+    got = order(["\U0001F346", "\u2764\ufe0f", "\U0001F44D", "\U0001F351"])
+    _assert(got == ["\U0001F44D", "\u2764\ufe0f", "\U0001F346", "\U0001F351"], got)
+    _assert(order([]) == [])
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

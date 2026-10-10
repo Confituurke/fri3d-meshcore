@@ -917,6 +917,53 @@ class ActionSheet:
             ActionSheet.shown.remove(self)
 
 
+class EmojiPicker:
+    """A panel of the emoji MicroPythonOS can draw, from the bottom of the screen like an
+    action sheet. A tap calls `on_pick(emoji)` and leaves it open; a tap outside closes it."""
+
+    CELL = 52
+
+    def __init__(self, on_pick):
+        ActionSheet.shown.append(self)
+        try:
+            available = FontManager.getEmojiStrings()
+        except Exception:
+            available = []
+        self.order = ui_model.emoji_order(available)
+        self.dim = box(lv.layer_top(), W, H)
+        self.dim.set_style_bg_color(color(0x000000), lv.PART.MAIN)
+        self.dim.set_style_bg_opa(lv.OPA._30, lv.PART.MAIN)
+        clickable(self.dim, self.close, feedback=False)
+        panel = box(self.dim, W, KEYBOARD_H + 64, lv.FLEX_FLOW.ROW_WRAP)
+        fill(panel, SURFACE, 16)
+        panel.set_style_pad_all(10, lv.PART.MAIN)
+        panel.set_style_pad_bottom(26, lv.PART.MAIN)
+        panel.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.START)
+        panel.align(lv.ALIGN.BOTTOM_MID, 0, 16)       # rounded top corners only
+        panel.add_flag(lv.obj.FLAG.SCROLLABLE)
+        panel.set_scroll_dir(lv.DIR.VER)
+        clickable(panel, lambda: None, feedback=False)  # taps between cells keep it open
+        f = font(26, emoji=True)
+        self.cells = {}
+        for e in self.order:
+            cell = box(panel, self.CELL, self.CELL)
+            lb = lv.label(cell)
+            lb.set_text(e)
+            lb.set_style_text_font(f, lv.PART.MAIN)
+            lb.center()
+            clickable(cell, lambda e=e: on_pick(e))
+            self.cells[e] = cell
+        if not self.order:
+            label(panel, "No emoji on this system.", 15, col=MUTED)
+
+    def close(self):
+        if self.dim is not None:
+            self.dim.delete()
+            self.dim = None
+        if self in ActionSheet.shown:
+            ActionSheet.shown.remove(self)
+
+
 def close_sheets():
     """Close every open action sheet (a screen being left must not leave one behind)."""
     for s in list(ActionSheet.shown):
