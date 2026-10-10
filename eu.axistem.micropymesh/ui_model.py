@@ -70,6 +70,30 @@ def time_text(ts, now_s, tz_s=0):
     return "%d %s" % (t[2], _MONTHS[t[1] - 1])
 
 
+_DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def day_number(ts, tz_s=0):
+    """The local day `ts` falls on, as a day count: equal for times on the same date."""
+    return (ts + tz_s) // 86400
+
+
+def day_text(ts, now_s, tz_s=0):
+    """A thread's day divider: 'Today', 'Yesterday', a weekday this week, '12 Sep', or
+    '28 Aug 2025' in another year."""
+    ago = day_number(now_s, tz_s) - day_number(ts, tz_s)
+    if ago == 0:
+        return "Today"
+    if ago == 1:
+        return "Yesterday"
+    t = _gmtime(ts + tz_s)
+    if 1 < ago < 7:
+        return _DAY_NAMES[t[6]]
+    if t[0] != _gmtime(now_s + tz_s)[0]:
+        return "%d %s %d" % (t[2], _MONTHS[t[1] - 1], t[0])
+    return "%d %s" % (t[2], _MONTHS[t[1] - 1])
+
+
 def tz_offset(local_tuple, utc_tuple):
     """Seconds the local clock is ahead of UTC, from the same instant read both ways
     (time tuples). Offsets are taken to lie within -12 h .. +14 h."""

@@ -495,5 +495,15 @@ def test_favourites_come_first_and_have_a_filter():
     _assert([r["fav"] for r in ui.node_rows(nodes, now)] == [True, False, False])
 
 
+def test_day_text():
+    t = _ui().day_text
+    _assert(t(NOW - 3600, NOW) == "Today")                       # NOW: Fri 2 Oct 2026, 14:32 UTC
+    _assert(t(NOW - 15 * 3600, NOW) == "Yesterday", t(NOW - 15 * 3600, NOW))
+    _assert(t(NOW - 3 * 86400, NOW) == "Tuesday", t(NOW - 3 * 86400, NOW))
+    _assert(t(NOW - 20 * 86400, NOW) == "12 Sep", t(NOW - 20 * 86400, NOW))
+    _assert(t(NOW - 400 * 86400, NOW) == "28 Aug 2025", t(NOW - 400 * 86400, NOW))
+    _assert(t(NOW - 15 * 3600, NOW, tz_s=3600) == "Today", "local midnight, not UTC")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

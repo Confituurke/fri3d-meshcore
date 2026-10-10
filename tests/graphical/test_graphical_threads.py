@@ -142,5 +142,38 @@ class TestThreads(unittest.TestCase):
         self.assertTrue(len(counts) >= 3, counts)
 
 
+class TestDayDividers(unittest.TestCase):
+    def setUp(self):
+        self.m = mc_fixtures.fresh_manager()
+
+    def tearDown(self):
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+
+    def test_a_divider_before_each_day(self):
+        import meshcore_manager as mm
+        import ui_theme
+        now = mm.unix_time()
+        tz = ui_theme.tz_offset_s()
+        midnight = (now + tz) // 86400 * 86400 - tz
+        for ts, text in ((midnight - 7200, "late last night"), (midnight - 3600, "still up"),
+                         (midnight + 60, "after midnight")):
+            self.m._add_message("Public", {"ts": ts, "sender": "Sam", "text": text,
+                                           "incoming": True})
+        act = mc_fixtures.open_thread("channel", "Public")
+        labels = lambda: sorted(text for text, _ in act._days.values())
+        self.assertEqual(labels(), ["Today", "Yesterday"])
+        scr = lv.screen_active()
+        self.assertIsNotNone(find_label_with_text(scr, "Yesterday"))
+        self.assertIsNotNone(find_label_with_text(scr, "Today"))
+        kids = [act.list.get_child(i) for i in range(act.list.get_child_count())]
+        today = [o for text, o in act._days.values() if text == "Today"][0]
+        self.assertEqual(kids.index(today),
+                         kids.index(act._bubbles[id(self.m.get_messages("Public")[2])].obj) - 1)
+        self.m.delete_message("Public", self.m.get_messages("Public")[2])
+        act.refresh(scroll=False)
+        self.assertEqual(labels(), ["Yesterday"], "a day without messages loses it")
+
+
 if __name__ == "__main__":
     unittest.main()

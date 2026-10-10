@@ -10,7 +10,7 @@ from mpos import Activity, Intent
 
 import ui_model
 import ui_theme as T
-from meshcore_manager import MeshCoreManager
+from meshcore_manager import MeshCoreManager, unix_time
 
 PAGE = 25                   # bubbles shown on opening; "Show earlier messages" adds a page
 BUBBLE_MAX_W = 360
@@ -122,6 +122,7 @@ class ThreadActivity(Activity):
         self._limit = PAGE
         self._earlier = None
         self._divider = None
+        self._days = {}               # local day number -> (label, divider)
         scr = T.make_screen()
         self.build_header(scr)
         gap = 10 if self.pad_ver == 9 else 8
@@ -255,9 +256,18 @@ class ThreadActivity(Activity):
         self._limit += PAGE
         self._bubbles = {}
         self._divider = None
+        self._days = {}
         self._earlier = None
         self.list.clean()
         self.refresh(scroll=False)
+
+    def _day_divider(self, text):
+        r = T.row(self.list, lv.pct(100), lv.SIZE_CONTENT, 0, lv.FLEX_ALIGN.CENTER)
+        pill = T.row(r, lv.SIZE_CONTENT, 24, 0, lv.FLEX_ALIGN.CENTER)
+        T.fill(pill, T.SURFACE, 12)
+        pill.set_style_pad_hor(10, lv.PART.MAIN)
+        T.label(pill, text, 13, 600, T.MUTED)
+        return r
 
     def _new_divider(self):
         r = T.row(self.list, lv.pct(100), 18, 10)
@@ -281,10 +291,20 @@ class ThreadActivity(Activity):
         for k in list(self._bubbles):
             if k not in live:
                 self._bubbles.pop(k).obj.delete()
+        days = set(ui_model.day_number(m.get("ts", 0), self._tz) for m in msgs)
+        for d in list(self._days):
+            if d not in days:
+                self._days.pop(d)[1].delete()
+        now = unix_time()
         added = False
+        prev = None
         for i, m in enumerate(msgs):
             b = self._bubbles.get(id(m))
+            day = ui_model.day_number(m.get("ts", 0), self._tz)
             if b is None:
+                if day != prev and day not in self._days:
+                    text = ui_model.day_text(m.get("ts", 0), now, self._tz)
+                    self._days[day] = (text, self._day_divider(text))
                 if (self._new_divider_at and i == len(msgs) - self._new_divider_at
                         and self._divider is None):
                     self._divider = self._new_divider()
@@ -294,6 +314,7 @@ class ThreadActivity(Activity):
                 added = True
             else:
                 b.update()
+            prev = day
         if added and scroll:
             self._scroll_to_end()
 
