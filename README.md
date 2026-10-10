@@ -6,20 +6,27 @@ for 480×480 touch screens and developed on the Seeed SenseCAP Indicator D1L (ES
 app id is **`eu.axistem.micropymesh`**.
 It is based on [fri3d-meshcore](https://github.com/lucid-void/fri3d-meshcore) by lucid-void.
 
-- **Chats:** Public, `#hashtag` and private channels; direct messages (X25519 + AES-128 + HMAC)
-  with delivery acknowledgements and retries; room servers. Interoperable with the MeshCore apps.
-- **Contacts:** saved contacts and a list of discovered nodes (add with +); auto-add by type and
-  hop count; add by public key or `meshcore://` contact card.
+- **Chats:** Public, `#hashtag` and private channels (keys in hex or base64, new random keys,
+  shared and joined by QR or `meshcore://` link); direct messages (X25519 + AES-128 + HMAC)
+  with delivery acknowledgements, retries and optional extra acks; room servers. Day dividers,
+  an emoji picker, tappable links (contacts, channels, `#hashtags`, places on the map), block
+  senders, mark all as read. Interoperable with the MeshCore apps.
+- **Contacts:** saved contacts and a list of discovered nodes (add with +); favourites; sort by
+  last heard, name, distance or last message; auto-add by type and hop count; add by public
+  key or `meshcore://` contact card.
 - **Routing:** per contact auto / flood / a typed path; path hash size 1, 2 or 3 bytes; region
-  scopes with a default and a per-channel override.
-- **Repeaters and rooms:** guest or admin login, status, neighbours, telemetry, ping, trace.
+  scopes with a default and a per-channel override; automatic flood and zero-hop adverts.
+- **Repeaters and rooms:** guest or admin login with remembered passwords, status, neighbours,
+  telemetry, ping, trace; room sessions kept alive, logging in again by itself; a warning
+  when a server's clock is off.
 - **Message details:** hops, the path with repeater names, SNR, RSSI, region, delivery.
 - **Map:** offline tiles from the SD card with pins for contacts, a discovered-nodes map, your
   own position (typed, picked on the map, or from a GPS).
 - **Identity:** an on-device Ed25519 key pair and signed adverts; your contact as a QR for the
   MeshCore app to scan; export, or a new identity.
 - **Look:** follows the system light or dark mode and accent colour, or the app's own choice.
-- **Background radio service:** keeps receiving while the app is closed, with sounds per kind.
+- **Background radio service:** keeps receiving while the app is closed, with sounds per kind
+  and quiet hours.
 
 Protocol logic is pure Python and unit-tested on the desktop.
 
