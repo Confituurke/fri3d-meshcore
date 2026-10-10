@@ -1,6 +1,6 @@
 """Pages about how packets travel: a contact's route (auto, flood or a typed path), the
-details of one message, the path hash size, the regions and default scope, and a channel's
-scope."""
+details of one message, the path hash size, the regions and default scope, a channel's
+scope, and the automatic adverts."""
 
 import lvgl as lv
 
@@ -8,7 +8,7 @@ from mpos import Activity
 
 import ui_model
 import ui_theme as T
-from meshcore_manager import MeshCoreManager
+from meshcore_manager import MeshCoreManager, AUTO_ADVERT_FLOOD_H, AUTO_ADVERT_ZERO_HOP_MIN
 
 
 class _Page(Activity):
@@ -164,6 +164,31 @@ class PathHashActivity(_Page):
 
     def choose(self, i):
         self.mgr.set_path_hash_size(i + 1)
+        self.rebuild()
+
+
+class AutoAdvertActivity(_Page):
+    """How often we advertise by ourselves: through the whole mesh, and to direct neighbours."""
+
+    title = "Automatic adverts"
+
+    def build(self, body):
+        cfg = self.mgr.auto_advert_settings()
+        T.section_label(body, "Through the whole mesh")
+        self.flood_rows = T.choice_list(
+            body, [("Off", 0)] + [("Every %d hours" % h, h) for h in AUTO_ADVERT_FLOOD_H if h],
+            cfg["flood_h"], lambda v: self.choose(flood_h=v))
+        self.note("Every flood advert is repeated by every repeater. Twelve hours or more keeps "
+                  "the mesh quiet; others still learn of you from your messages.")
+        T.section_label(body, "To direct neighbours")
+        self.zero_rows = T.choice_list(
+            body, [("Off", 0)] + [("Every " + ui_model._minutes(m), m)
+                                  for m in AUTO_ADVERT_ZERO_HOP_MIN if m],
+            cfg["zero_hop_min"], lambda v: self.choose(zero_hop_min=v))
+        self.note("Only nodes that hear you directly get these; repeaters do not pass them on.")
+
+    def choose(self, **change):
+        self.mgr.set_auto_advert(**change)
         self.rebuild()
 
 

@@ -205,6 +205,8 @@ DEFAULT_QUICK_REPLIES = ("copy", "on my way", "ETA 10 min", "signal report")
 MAX_QUICK_REPLIES = 8
 MAX_QUICK_REPLY_LEN = 40
 AUTO_ADD_KINDS = ("chat", "rptr", "room", "sensor")
+AUTO_ADVERT_FLOOD_H = (0, 3, 6, 12, 24)        # automatic flood advert: off or every N hours
+AUTO_ADVERT_ZERO_HOP_MIN = (0, 15, 30, 60, 120)  # automatic zero-hop advert: off or every N min
 AUTO_ADD_DEFAULTS = {"enabled": False, "all": False, "chat": False, "rptr": False, "room": False,
                      "sensor": False, "max_hops": None}
 MAX_HOPS = 64               # a flood path holds at most 64 hops
@@ -303,6 +305,8 @@ class MeshCoreManager:
         self._reinit_count = 0                    # radio re-inits (wedge recoveries)
         self._reset_count = 0                     # radio hardware resets attempted
         self._reset_fail_count = 0                # ... of which the chip did not come back
+        self._last_flood_ms = self._now_ms()      # automatic adverts count from here
+        self._last_zero_hop_ms = self._last_flood_ms
         self._load_identity()
         self._load_channels()
         self._seed_default_channels()
@@ -778,12 +782,56 @@ class MeshCoreManager:
         except Exception:
             pass
         self._enqueue_tx(pkt.to_bytes())   # the worker flushes it in the next RX gap
+        now = self._now_ms()
+        self._last_zero_hop_ms = now     # a flood advert reaches the neighbours too
+        if flood:
+            self._last_flood_ms = now
         print("MeshCore: advert queued (id 0x%02x, name '%s')" % (pub[0], self.nickname()))
         return (True, None)
 
-    # NOTE: advertising is manual only (the "Advertise now" button). There is no periodic
-    # auto-advert -- the background worker stays focused on receiving. Sending an advert
-    # briefly takes the radio off RX (sign + TX), so we only do it on explicit request.
+    def auto_advert_settings(self):
+        """{flood_h, zero_hop_min}: automatic advert intervals, 0 = off."""
+        out = {"flood_h": 0, "zero_hop_min": 0}
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS).get_dict("auto_advert", {}) or {}
+            if saved.get("flood_h") in AUTO_ADVERT_FLOOD_H:
+                out["flood_h"] = saved["flood_h"]
+            if saved.get("zero_hop_min") in AUTO_ADVERT_ZERO_HOP_MIN:
+                out["zero_hop_min"] = saved["zero_hop_min"]
+        except Exception:
+            pass
+        return out
+
+    def set_auto_advert(self, flood_h=None, zero_hop_min=None):
+        cur = self.auto_advert_settings()
+        if flood_h in AUTO_ADVERT_FLOOD_H:
+            cur["flood_h"] = flood_h
+        if zero_hop_min in AUTO_ADVERT_ZERO_HOP_MIN:
+            cur["zero_hop_min"] = zero_hop_min
+        try:
+            ed = self._editor()
+            ed.put_dict("auto_advert", cur)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: auto advert settings error:", repr(e))
+        self._auto_advert_cache = cur
+        return cur
+
+    def _auto_advert_tick(self):
+        """Send the automatic adverts that are due. The timers count from the last advert
+        of that kind (by hand or automatic), or from the start."""
+        cfg = getattr(self, "_auto_advert_cache", None)
+        if cfg is None:
+            cfg = self._auto_advert_cache = self.auto_advert_settings()
+        if not (cfg["flood_h"] or cfg["zero_hop_min"]) or not self.has_identity():
+            return
+        now = self._now_ms()
+        if cfg["flood_h"] and tdiff(now, self._last_flood_ms) >= cfg["flood_h"] * 3600000:
+            self.advertise(flood=True)
+        elif (cfg["zero_hop_min"]
+              and tdiff(now, self._last_zero_hop_ms) >= cfg["zero_hop_min"] * 60000):
+            self.advertise(flood=False)
 
     # --- channel management ------------------------------------------------- #
     def _load_channels(self):
@@ -1331,7 +1379,7 @@ class MeshCoreManager:
                     and not did_rx and not self._rx_pending()):
                 did_tx = self._drain_tx()
             # 4) Idle: run the RX watchdog (re-arm/re-init if the chip fell out of RX), flush
-            #    any coalesced DM-history writes, then sleep briefly. No auto-advert.
+            #    any coalesced DM-history writes, send due automatic adverts, then sleep briefly.
             if not did_rx and not did_proc and not did_tx:
                 self._rx_watchdog()
                 self._sample_noise()
@@ -1347,6 +1395,10 @@ class MeshCoreManager:
                         print("MeshCoreManager: server tick error:", repr(e))
                 self._flush_due()
                 self._gps_tick()
+                try:
+                    self._auto_advert_tick()
+                except Exception as e:
+                    print("MeshCoreManager: auto advert error:", repr(e))
                 time.sleep(0.02)   # portable (MicroPython + CPython)
         self._worker_running = False
         self._flush_dirty()   # persist anything pending as the worker exits

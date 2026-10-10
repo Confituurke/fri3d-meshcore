@@ -329,6 +329,20 @@ def radio_texts(st):
                       ("TX air", "%.1f %%" % st.get("tx_air_pct", 0.0))]}
 
 
+def _minutes(m):
+    return "%d h" % (m // 60) if m >= 60 and m % 60 == 0 else "%d min" % m
+
+
+def auto_advert_text(cfg):
+    """The Settings value for automatic adverts: "Off", "12 h", "nearby 30 min", or both."""
+    parts = []
+    if cfg["flood_h"]:
+        parts.append("%d h" % cfg["flood_h"])
+    if cfg["zero_hop_min"]:
+        parts.append("nearby " + _minutes(cfg["zero_hop_min"]))
+    return " \u00b7 ".join(parts) or "Off"
+
+
 def preset_summary(p, power):
     """(title, detail, airtime) for the Radio tab's preset card."""
     title = p.get("name") or "Custom"

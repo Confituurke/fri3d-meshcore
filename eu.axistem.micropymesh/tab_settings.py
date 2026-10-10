@@ -6,6 +6,7 @@ import lvgl as lv
 from mpos import Intent
 
 import meshcore_presets
+import ui_model
 import ui_theme as T
 import routing_pages
 import settings_pages
@@ -46,6 +47,8 @@ class SettingsTab(Tab):
                                       lambda: self._open(routing_pages.PathHashActivity))
         self._regions_row = T.SettingRow(card, "Regions", self._regions_text(),
                                          lambda: self._open(routing_pages.RegionsActivity))
+        self._advert_row = T.SettingRow(card, "Automatic adverts", self._advert_text(),
+                                        lambda: self._open(routing_pages.AutoAdvertActivity))
         row = T.row(card, lv.pct(100), 52, 8)
         T.divider(row, lv.BORDER_SIDE.TOP)
         T.label(row, "Receive in background", 16).set_flex_grow(1)
@@ -197,6 +200,9 @@ class SettingsTab(Tab):
         n = self.mgr.path_hash_size()
         return "%d byte%s" % (n, "" if n == 1 else "s")
 
+    def _advert_text(self):
+        return ui_model.auto_advert_text(self.mgr.auto_advert_settings())
+
     def _regions_text(self):
         d = self.mgr.default_region()
         return "#" + d if d else ("%d, no default" % len(self.mgr.regions())
@@ -241,6 +247,7 @@ class SettingsTab(Tab):
         self._preset_row.value.set_text(self._preset_text())
         self._hash_row.value.set_text(self._hash_text())
         self._regions_row.value.set_text(self._regions_text())
+        self._advert_row.value.set_text(self._advert_text())
         self._show_auto(self.mgr.auto_add_settings())
         self._location_row.value.set_text(self._location_text())
         self._look_row.value.set_text(settings_pages.appearance_text())
