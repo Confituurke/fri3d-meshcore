@@ -505,5 +505,43 @@ def test_day_text():
     _assert(t(NOW - 15 * 3600, NOW, tz_s=3600) == "Today", "local midnight, not UTC")
 
 
+KEY = "9cd8fcf22a47333b591d96a2b848b73f457b1bb1a3ea2453a885f9e5787765b1"
+
+
+def test_message_links():
+    links = _ui().message_links
+    got = links("add me: meshcore://contact/add?name=Example+Contact&public_key=%s&type=1 ok" % KEY)
+    _assert(got == [{"kind": "contact", "uri": "meshcore://contact/add?name=Example+Contact"
+                     "&public_key=%s&type=1" % KEY, "name": "Example Contact", "key": KEY,
+                     "type": 1}], got)
+    got = links("join meshcore://channel/add?name=Ops&secret=8b3387e9c5cdea6ac9e5edbaa115cd72.")
+    _assert(got == [{"kind": "channel", "uri": "meshcore://channel/add?name=Ops&secret="
+                     "8b3387e9c5cdea6ac9e5edbaa115cd72", "name": "Ops"}], got)
+    _assert(links("see #test and #Gent-Noord!") == [{"kind": "hashtag", "name": "#test"},
+                                                    {"kind": "hashtag", "name": "#gent-noord"}])
+    _assert(links("meet at 50.8503, 4.3517 at noon") ==
+            [{"kind": "map", "lat": 50.8503, "lon": 4.3517}], links("meet at 50.8503, 4.3517"))
+    _assert(links("geo:51.05,3.72") == [{"kind": "map", "lat": 51.05, "lon": 3.72}])
+    _assert(links("https://maps.google.com/?q=-33.86,151.21") ==
+            [{"kind": "map", "lat": -33.86, "lon": 151.21}])
+
+
+def test_message_links_ignores_what_is_not_a_link():
+    links = _ui().message_links
+    for text in ("version 1.2.3", "50, 4", "123.45, 678.9", "price 3.50,4.20 eur",
+                 "a # alone", "meshcore://contact/add?name=x&public_key=zz", "C# and F#", ""):
+        _assert(links(text) == [], (text, links(text)))
+    _assert(len(links("#a #b #c #d #e")) == 3, "at most three")
+
+
+def test_link_text():
+    t = _ui().link_text
+    _assert(t({"kind": "contact", "name": "Bob", "key": KEY}, False) == "Add Bob")
+    _assert(t({"kind": "contact", "name": None, "key": KEY}, True) == "Open 9CD8FCF2")
+    _assert(t({"kind": "channel", "name": "Ops"}, False) == "Join Ops")
+    _assert(t({"kind": "hashtag", "name": "#test"}, True) == "Open #test")
+    _assert(t({"kind": "map", "lat": 50.8503, "lon": 4.3517}, False) == "Map 50.8503, 4.3517")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

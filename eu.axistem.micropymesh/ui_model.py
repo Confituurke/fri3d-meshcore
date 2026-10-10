@@ -702,3 +702,127 @@ def message_details(msg, tz_s=0, nodes=()):
             status = "sent" if msg.get("tx") else "sending"
         rows.append(("Status", status))
     return rows
+
+
+# --- links in messages ---------------------------------------------------------- #
+
+_TRAIL = ".,;:!?)]}>'\""
+_LEAD = "([{<'\""
+_MAX_LINKS = 3
+
+
+def _num_at(t, i):
+    """A decimal number (-12.345) starting at t[i]: (value, decimals, end) or None. It must
+    stand on its own: no digit, letter or dot right before or after it."""
+    n = len(t)
+    if i > 0 and (t[i - 1].isalpha() or t[i - 1].isdigit() or t[i - 1] in ".-"):
+        return None
+    j = i + 1 if i < n and t[i] == "-" else i
+    k = j
+    while k < n and t[k].isdigit():
+        k += 1
+    if k == j or k >= n or t[k] != ".":
+        return None
+    d = k + 1
+    while d < n and t[d].isdigit():
+        d += 1
+    if d == k + 1 or (d < n and (t[d] == "." or t[d].isalpha() or t[d].isdigit())):
+        return None
+    return float(t[i:d]), d - k - 1, d
+
+
+def _pair_at(t, i, min_decimals):
+    """'lat, lon' starting at t[i]: (lat, lon, end) or None."""
+    a = _num_at(t, i)
+    if a is None or a[1] < min_decimals:
+        return None
+    j = a[2]
+    while j < len(t) and t[j] == " ":
+        j += 1
+    if j >= len(t) or t[j] != ",":
+        return None
+    j += 1
+    while j < len(t) and t[j] == " ":
+        j += 1
+    b = _num_at(t, j)
+    if b is None or b[1] < min_decimals:
+        return None
+    if not (-90 <= a[0] <= 90 and -180 <= b[0] <= 180):
+        return None
+    return a[0], b[0], b[2]
+
+
+def _hashtag(tok):
+    name = tok[1:].lower()
+    if (len(tok) < 2 or tok[0] != "#" or name.isdigit()
+            or not all(c.isalpha() or c.isdigit() or c in "-_" for c in name)):
+        return None
+    return "#" + name
+
+
+def message_links(text):
+    """What can be tapped in a message, in order (at most three): meshcore:// contact and
+    channel links, #hashtag channels, and places (geo:, a maps link's q=, or a bare
+    'lat, lon' with at least three decimals)."""
+    from meshcore_advert import parse_contact_text, parse_channel_uri
+    t = text or ""
+    out = []
+    places = set()
+
+    def place(lat, lon):
+        if (lat, lon) not in places:
+            places.add((lat, lon))
+            out.append({"kind": "map", "lat": lat, "lon": lon})
+
+    for tok in t.split():
+        while tok and tok[0] in _LEAD:
+            tok = tok[1:]
+        while tok and tok[-1] in _TRAIL:
+            tok = tok[:-1]
+        if tok.startswith("meshcore://contact/add?"):
+            got = parse_contact_text(tok)
+            if got is not None:
+                out.append({"kind": "contact", "uri": tok, "name": got[1], "key": got[0],
+                            "type": got[2]})
+        elif tok.startswith("meshcore://channel/add?"):
+            got = parse_channel_uri(tok)
+            if got is not None:
+                out.append({"kind": "channel", "uri": tok, "name": got[0]})
+        elif tok.startswith("#"):
+            tag = _hashtag(tok)
+            if tag is not None:
+                out.append({"kind": "hashtag", "name": tag})
+        else:
+            for marker in ("geo:", "q=", "ll=", "query="):
+                at = tok.find(marker)
+                if at >= 0 and (marker == "geo:" or at == 0 or tok[at - 1] in "?&"):
+                    got = _pair_at(tok, at + len(marker), 1)
+                    if got is not None:
+                        place(got[0], got[1])
+                    break
+    i = 0
+    while i < len(t):
+        got = _pair_at(t, i, 3)
+        if got is not None:
+            place(got[0], got[1])
+            i = got[2]
+        else:
+            i += 1
+    return out[:_MAX_LINKS]
+
+
+def _coord(v):
+    return ("%.4f" % v).rstrip("0").rstrip(".")
+
+
+def link_text(link, known):
+    """A link chip's text; `known`: the contact or channel is already ours."""
+    kind = link["kind"]
+    if kind == "map":
+        return "Map %s, %s" % (_coord(link["lat"]), _coord(link["lon"]))
+    if kind == "contact":
+        name = display(link.get("name")) or link["key"][:8].upper()
+    else:
+        name = link["name"]
+    verb = "Open" if known else ("Add" if kind == "contact" else "Join")
+    return "%s %s" % (verb, name)

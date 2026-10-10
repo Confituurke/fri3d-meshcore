@@ -28,6 +28,7 @@ HOME = (50.64, 4.67, 8)         # Belgium, when no node has a position
 CREDIT = "© OpenMapTiles © OpenStreetMap contributors"
 PIN = 14
 ME = 18                         # our own marker: a light dot in an accent ring
+SPOT = 26                       # a place from a message: a dark ring in the accent colour
 ME_ZOOM = 15
 LABEL_ZOOM = 13                 # names next to the pins from this zoom on
 TAP_PX = 28
@@ -141,7 +142,7 @@ class _Slot:
 class MapView:
 
     def __init__(self, parent, mgr, w, h, open_node, focus=None, controls=True,
-                 source="contacts"):
+                 source="contacts", spot=None):
         self.mgr = mgr
         self.source = source
         self.w, self.h = w, h
@@ -163,6 +164,10 @@ class MapView:
         self.me = T.box(self.pin_layer, ME, ME)
         T.fill(self.me, T.TEXT, ME // 2, T.ACCENT, 4)
         self.me.add_flag(lv.obj.FLAG.HIDDEN)
+        self.spot_at = spot           # (lat, lon) of a place to mark, e.g. from a message
+        self.spot = T.box(self.pin_layer, SPOT, SPOT)
+        T.fill(self.spot, T.BG, SPOT // 2, T.ACCENT, 4)
+        self.spot.add_flag(lv.obj.FLAG.HIDDEN)
         self._pin_model = []
         self._drag = None
         self._ready = False
@@ -211,6 +216,8 @@ class MapView:
         me = self.mgr.position()
         if focus == "me" and me:
             return me["lat"], me["lon"], ME_ZOOM
+        if isinstance(focus, tuple):
+            return focus[0], focus[1], 15
         if focus is not None:
             for n in nodes:
                 if n.get("pubkey") == focus and M.positions([n]):
@@ -326,8 +333,21 @@ class MapView:
         else:
             self.me.add_flag(lv.obj.FLAG.HIDDEN)
 
+    def _place_spot(self):
+        if self.spot_at is None:
+            return
+        x, y = M.world_px(self.spot_at[0], self.spot_at[1], self.z)
+        sx, sy = x - (self.cx - self.w / 2), y - (self.cy - self.h / 2)
+        if -SPOT <= sx <= self.w + SPOT and -SPOT <= sy <= self.h + SPOT:
+            self.spot.set_pos(int(sx) - SPOT // 2, int(sy) - SPOT // 2)
+            self.spot.remove_flag(lv.obj.FLAG.HIDDEN)
+            self.spot.move_foreground()
+        else:
+            self.spot.add_flag(lv.obj.FLAG.HIDDEN)
+
     def _place_pins(self):
         self._place_me()
+        self._place_spot()
         model = M.pins(self._nodes, self.cx, self.cy, self.z, self.w, self.h)
         contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
         for p in model:
@@ -451,16 +471,24 @@ class DiscoveredMapActivity(Activity):
 
 
 class MapActivity(Activity):
-    """The map on its own screen, centred on the node in extras["pubkey"]."""
+    """The map on its own screen, centred on the node in extras["pubkey"], or on the place
+    in extras["lat"], extras["lon"] (marked with a ring)."""
 
     def onCreate(self):
         self.mgr = MeshCoreManager.get_instance()
-        pk = self.getIntent().extras.get("pubkey")
-        node = self.mgr.get_node(pk) or self.mgr.get_contact(pk) or {}
+        extras = self.getIntent().extras or {}
+        pk = extras.get("pubkey")
         scr = T.make_screen()
-        T.HeaderSub(scr, ui_model.display(node.get("name")) or "Map", "Map", back=self.finish)
+        spot = None
+        if extras.get("lat") is not None and extras.get("lon") is not None:
+            spot = (extras["lat"], extras["lon"])
+            T.HeaderSub(scr, "Shared place", "%.4f, %.4f" % spot, back=self.finish)
+        else:
+            node = self.mgr.get_node(pk) or self.mgr.get_contact(pk) or {}
+            T.HeaderSub(scr, ui_model.display(node.get("name")) or "Map", "Map", back=self.finish)
         self.view = MapView(scr, self.mgr, T.W, T.H - T.TOP - T.HEADER_H,
-                            lambda p, k: open_node(self, self.mgr, p, k), focus=pk, source="all")
+                            lambda p, k: open_node(self, self.mgr, p, k),
+                            focus=spot if spot else pk, source="all", spot=spot)
         self.setContentView(scr)
 
     def onDestroy(self, screen):

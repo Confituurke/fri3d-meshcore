@@ -175,5 +175,55 @@ class TestDayDividers(unittest.TestCase):
         self.assertEqual(labels(), ["Yesterday"], "a day without messages loses it")
 
 
+class TestLinks(unittest.TestCase):
+    def setUp(self):
+        self.m = mc_fixtures.fresh_manager()
+
+    def tearDown(self):
+        mpos.ui.remove_and_stop_all_activities()
+        wait_for_render(5)
+
+    def _thread_with(self, text):
+        import meshcore_manager as mm
+        msg = {"ts": mm.unix_time(), "sender": "Sam", "text": text, "incoming": True}
+        self.m._add_message("Public", msg)
+        act = mc_fixtures.open_thread("channel", "Public")
+        return act, act._bubbles[id(self.m.get_messages("Public")[-1])]
+
+    @staticmethod
+    def _chip_texts(bubble):
+        return [c.get_child(0).get_text() for c in bubble.links]
+
+    def test_a_hashtag_joins_and_opens_the_channel(self):
+        act, b = self._thread_with("join #ops and meet at 50.8503, 4.3517")
+        self.assertEqual(self._chip_texts(b), ["Join #ops", "Map 50.8503, 4.3517"])
+        b.links[0].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        self.assertIsNotNone(self.m.get_channel("#ops"))
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "ChannelChatActivity")
+        self.assertEqual(page.key(), "#ops")
+
+    def test_coordinates_open_the_map_there(self):
+        act, b = self._thread_with("meet at 50.8503, 4.3517")
+        b.links[0].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        page = mpos.ui.screen_stack[-1][0]
+        self.assertEqual(type(page).__name__, "MapActivity")
+        lat, lon = page.view.center()
+        self.assertAlmostEqual(lat, 50.8503, places=3)
+        self.assertAlmostEqual(lon, 4.3517, places=3)
+        self.assertFalse(page.view.spot.has_flag(lv.obj.FLAG.HIDDEN))
+
+    def test_a_contact_link_adds_and_opens_the_contact(self):
+        uri = "meshcore://contact/add?name=Bob&public_key=%s&type=1" % mc_fixtures.BOB
+        act, b = self._thread_with("this is me " + uri)
+        self.assertEqual(self._chip_texts(b), ["Add Bob"])
+        b.links[0].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(20)
+        self.assertTrue(self.m.is_contact(mc_fixtures.BOB))
+        self.assertEqual(type(mpos.ui.screen_stack[-1][0]).__name__, "DMChatActivity")
+
+
 if __name__ == "__main__":
     unittest.main()

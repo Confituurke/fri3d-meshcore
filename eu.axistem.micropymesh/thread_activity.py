@@ -21,7 +21,8 @@ class _Bubble:
     corner squared, meta line. Ours: blue bubble on the right with its top-right corner
     squared and a status line (time · heard ×N with dots, delivered ✓, or failed ↻)."""
 
-    def __init__(self, parent, msg, show_sender, tz_s, on_resend, pad_ver, on_menu=None):
+    def __init__(self, parent, msg, show_sender, tz_s, on_resend, pad_ver, on_menu=None,
+                 on_link=None, link_known=None):
         self.msg = msg
         own = not msg.get("incoming")
         self.obj = T.row(parent, lv.pct(100), lv.SIZE_CONTENT, 0,
@@ -49,6 +50,17 @@ class _Bubble:
         text.set_style_max_width(BUBBLE_MAX_W - 26, lv.PART.MAIN)
         text.set_width(lv.SIZE_CONTENT)
         text.set_style_text_line_space(4, lv.PART.MAIN)
+        self.links = []
+        found = ui_model.message_links(msg.get("text", "")) if on_link is not None else []
+        if found:
+            # what can be tapped in the text, as chips under the bubble
+            bar = T.box(group, lv.SIZE_CONTENT, lv.SIZE_CONTENT, lv.FLEX_FLOW.ROW_WRAP)
+            bar.set_style_max_width(BUBBLE_MAX_W, lv.PART.MAIN)
+            bar.set_style_pad_column(6, lv.PART.MAIN)
+            bar.set_style_pad_row(6, lv.PART.MAIN)
+            for link in found:
+                self.links.append(T.quick_chip(bar, ui_model.link_text(link, link_known(link)),
+                                               lambda link=link: on_link(link)))
         self.meta = T.row(group, lv.SIZE_CONTENT, lv.SIZE_CONTENT, 5)
         if own:
             # "tap to resend" sits in the meta line, so it answers taps as well as the bubble.
@@ -219,6 +231,38 @@ class ThreadActivity(Activity):
         self.sheet = T.ActionSheet(title[:60], actions,
                                    msg.get("sender") if msg.get("incoming") else "You")
 
+    def link_known(self, link):
+        if link["kind"] == "contact":
+            return self.mgr.is_contact(link["key"])
+        if link["kind"] in ("channel", "hashtag"):
+            return self.mgr.get_channel(link["name"]) is not None
+        return False
+
+    def open_link(self, link):
+        """A link chip: add or open a contact, join or open a channel, show a place on the map."""
+        kind = link["kind"]
+        if kind == "map":
+            import map_view
+            intent = Intent(activity_class=map_view.MapActivity)
+            intent.putExtra("lat", link["lat"])
+            intent.putExtra("lon", link["lon"])
+        elif kind == "contact":
+            import tab_nodes
+            pk = link["key"]
+            if not self.mgr.is_contact(pk):
+                self.mgr.add_contact(pk, link.get("name"), link.get("type", 1))
+            tab_nodes.open_node(self, self.mgr, pk, "chat" if link.get("type", 1) == 1 else "node")
+            return
+        else:
+            name = link["name"]
+            if self.mgr.get_channel(name) is None:
+                ok, err = self.mgr.add_channel(link["uri"] if kind == "channel" else name)
+                if not ok:
+                    return
+            intent = Intent(activity_class=ChannelChatActivity)
+            intent.putExtra("channel", name)
+        self.startActivity(intent)
+
     def open_details(self, msg):
         import routing_pages
         intent = Intent(activity_class=routing_pages.MessageDetailsActivity)
@@ -309,7 +353,7 @@ class ThreadActivity(Activity):
                         and self._divider is None):
                     self._divider = self._new_divider()
                 b = _Bubble(self.list, m, self.show_sender(), self._tz, self._resend, self.pad_ver,
-                            self.message_menu)
+                            self.message_menu, self.open_link, self.link_known)
                 self._bubbles[id(m)] = b
                 added = True
             else:
