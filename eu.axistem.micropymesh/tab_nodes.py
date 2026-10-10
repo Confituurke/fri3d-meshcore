@@ -15,6 +15,7 @@ from ui_tabs import Tab
 
 FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"),
            ("located", "With location"))
+CONTACT_FILTERS = FILTERS[:1] + (("fav", "Favourites"),) + FILTERS[1:]
 KIND_TAGS = {"chat": "chat", "rptr": "rptr", "room": "room", "sensor": "sens"}
 
 
@@ -82,6 +83,16 @@ class _NodeList:
         return ui_model.node_rows(nodes, self.mgr._now_ms(), self.filt, contacts, self.query,
                                   self.sort, here, self.mgr.last_message_times())
 
+    @staticmethod
+    def _star(row, on):
+        star = getattr(row, "star", None)
+        if on and star is None:
+            row.star = T.icon(row.title.get_parent(), "star", T.ACCENT)
+            row.star.move_to_index(1)
+        elif not on and star is not None:
+            star.delete()
+            row.star = None
+
     def show(self, model, empty_text):
         keep = set(r["pubkey"] for r in model)
         for key in list(self._rows):
@@ -102,6 +113,7 @@ class _NodeList:
             row = entry[0]
             row.set_avatar("node", r["hex"] + "\n" + KIND_TAGS.get(r["kind"], r["kind"]))
             row.title.set_text(r["name"])
+            self._star(row, r["fav"])
             row.right.set_text(r["age"])
             row.right.set_style_text_color(T.color(r["age_color"]), lv.PART.MAIN)
             row.line2.set_text(r["meta"])
@@ -145,7 +157,8 @@ class NodesTab(Tab):
         self.status = T.label(parent, "", 15, col=T.MUTED)
         self.status.set_style_pad_hor(16, lv.PART.MAIN)
         self.status.add_flag(lv.obj.FLAG.HIDDEN)
-        self.nodes = _NodeList(parent, activity, self.mgr, FILTERS, self.menu, self.refresh)
+        self.nodes = _NodeList(parent, activity, self.mgr, CONTACT_FILTERS, self.menu,
+                               self.refresh)
         self._timer = lv.timer_create(lambda t: self.refresh(), 30000, None)
         self.refresh()
 
@@ -226,6 +239,8 @@ class NodesTab(Tab):
                     "(top right); tap + there to add one.")
         if self.nodes.query:
             return "No contact matches \"%s\"." % self.nodes.query
+        if self.nodes.filt == "fav":
+            return "No favourites yet. Long-press a contact to add it."
         return "No contacts of this kind."
 
     def open_discovered(self):

@@ -484,5 +484,16 @@ def test_node_rows_sorting_and_the_location_filter():
     _assert(names(ui.node_rows(nodes, now, filt="located")) == ["Zed", "Amy"])
 
 
+def test_favourites_come_first_and_have_a_filter():
+    ui = _ui()
+    now, nodes = _located_nodes()
+    nodes[2]["fav"] = True                                  # Bob, heard last
+    names = lambda rows: [r["name"] for r in rows]
+    _assert(names(ui.node_rows(nodes, now)) == ["Bob", "Zed", "Amy"])
+    _assert(names(ui.node_rows(nodes, now, sort="name")) == ["Bob", "Amy", "Zed"])
+    _assert(names(ui.node_rows(nodes, now, filt="fav")) == ["Bob"])
+    _assert([r["fav"] for r in ui.node_rows(nodes, now)] == [True, False, False])
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

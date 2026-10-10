@@ -3047,6 +3047,19 @@ class MeshCoreManager:
                  reverse=True)
         return out
 
+    def is_favourite(self, pubkey_hex):
+        return bool((self._contacts.get(pubkey_hex) or {}).get("fav"))
+
+    def set_favourite(self, pubkey_hex, on):
+        """Star a contact (listed first, and under Favourites). False if it is no contact."""
+        c = self._contacts.get(pubkey_hex)
+        if c is None:
+            return False
+        c["fav"] = bool(on)
+        self._save_contacts()
+        self._notify("contacts", None)
+        return True
+
     def last_message_times(self):
         """{pubkey: timestamp of the latest direct message, either way}."""
         return {pk: msgs[-1].get("ts", 0) for pk, msgs in self._dm_messages.items() if msgs}
@@ -3211,6 +3224,7 @@ class MeshCoreManager:
                     "lat": entry.get("lat"),
                     "lon": entry.get("lon"),
                     "heard_ts": entry.get("heard_ts"),
+                    "fav": bool(entry.get("fav")),
                 }
                 self._dm_messages[pub_hex] = self._clean_history(histories.get(pub_hex), dm=True)
             except Exception as e:
@@ -3270,6 +3284,8 @@ class MeshCoreManager:
                     entry["path_raw"] = c.get("path_raw") or len(path)
                 if c.get("route_mode", "auto") != "auto":
                     entry["route_mode"] = c["route_mode"]
+                if c.get("fav"):
+                    entry["fav"] = True
                 data[h] = entry
             ed = self._editor()
             ed.put_dict("contacts", data)

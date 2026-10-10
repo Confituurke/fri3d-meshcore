@@ -265,11 +265,11 @@ SORTS = (("heard", "Last heard"), ("name", "Name"), ("nearest", "Nearest"),
 def node_rows(nodes, now_ms, filt="all", contacts=(), query="", sort="heard", here=None,
               last_msg=None):
     """Rows for the Nodes tab. filt: all, contacts (saved), chat, rptr, room, new (heard in
-    the last hour and not a contact), located (has a position); query matches the name or
+    the last hour and not a contact), located (has a position), fav (starred); query matches the name or
     hex id, any case. `nodes` come most recent first, as the manager lists them. sort:
     heard (that order), name, nearest (to `here`, (lat, lon); unplaced ones last) or
     message (`last_msg` {pubkey: ts}, newest first). With `here` the meta line ends in the
-    distance."""
+    distance. Favourites come first."""
     rows = []
     q = (query or "").strip().lower()
     for i, n in enumerate(nodes):
@@ -283,6 +283,9 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query="", sort="heard", he
                 continue
         elif filt == "located":
             if not _located(n):
+                continue
+        elif filt == "fav":
+            if not n.get("fav"):
                 continue
         elif filt != "all" and kind != filt:
             continue
@@ -303,15 +306,19 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query="", sort="heard", he
                      "kind": kind, "name": display(n.get("name")) or "?",
                      "age": age_text(age_s) if heard else "",
                      "age_color": _age_color(age_s), "meta": meta,
-                     "contact": n.get("pubkey") in contacts, "_i": i, "_d": dist})
-    # MicroPython's sort is not stable: the position in `nodes` breaks every tie
+                     "contact": n.get("pubkey") in contacts, "fav": bool(n.get("fav")),
+                     "_i": i, "_d": dist})
+    # Favourites first. MicroPython's sort is not stable: the position in `nodes` breaks
+    # every tie.
     if sort == "name":
-        rows.sort(key=lambda r: (r["name"].lower(), r["_i"]))
+        rows.sort(key=lambda r: (not r["fav"], r["name"].lower(), r["_i"]))
     elif sort == "nearest" and here is not None:
-        rows.sort(key=lambda r: (r["_d"] is None, r["_d"] or 0, r["_i"]))
+        rows.sort(key=lambda r: (not r["fav"], r["_d"] is None, r["_d"] or 0, r["_i"]))
     elif sort == "message":
         last = last_msg or {}
-        rows.sort(key=lambda r: (-last.get(r["pubkey"], -1), r["_i"]))
+        rows.sort(key=lambda r: (not r["fav"], -last.get(r["pubkey"], -1), r["_i"]))
+    else:
+        rows.sort(key=lambda r: (not r["fav"], r["_i"]))
     for r in rows:
         del r["_i"], r["_d"]
     return rows

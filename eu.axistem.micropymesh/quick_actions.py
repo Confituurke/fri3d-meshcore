@@ -128,6 +128,9 @@ def node_menu(activity, mgr, pk, discovered=False):
     title = ui_model.display(node.get("name")) or pk[:8]
     actions = node_actions(activity, mgr, pk)
     if mgr.is_contact(pk):
+        fav = mgr.is_favourite(pk)
+        actions.append(("Remove from favourites" if fav else "Add to favourites",
+                        lambda: mgr.set_favourite(pk, not fav)))
         actions.append(("Sounds…", lambda: sounds_menu(mgr, pk, title)))
         actions.append(("Remove contact", lambda: ask_remove_contact(mgr, pk, title), "danger"))
     else:

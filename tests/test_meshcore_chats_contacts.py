@@ -105,5 +105,17 @@ def test_contact_sort_is_kept():
     _assert(_restart(env).contact_sort() == "nearest")
 
 
+def test_favourites_are_kept_and_only_for_contacts():
+    env, m, pk = _setup()
+    _assert(not m.is_favourite(pk))
+    _assert(m.set_favourite(pk, True))
+    _assert(not m.set_favourite("ee" * 32, True), "not a contact")
+    m2 = _restart(env)
+    _assert(m2.is_favourite(pk), "kept across a restart")
+    _assert([n.get("fav") for n in m2.get_contact_nodes()] == [True])
+    m2.set_favourite(pk, False)
+    _assert(not _restart(env).is_favourite(pk))
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

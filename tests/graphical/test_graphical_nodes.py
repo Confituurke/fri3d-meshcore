@@ -63,6 +63,27 @@ class TestNodes(unittest.TestCase):
         wait_for_render(10)
         self.assertEqual(tab._order, [mc_fixtures.GENT])
 
+    def test_favourites_from_the_menu(self):
+        import ui_theme
+        for pk in (mc_fixtures.GENT, mc_fixtures.BOB):
+            self.m.add_contact(pk)
+        act = mc_fixtures.open_app(tab="Contacts")
+        tab = act._tab
+        self.assertEqual(tab._order, [mc_fixtures.BOB, mc_fixtures.GENT])
+        tab.menu(mc_fixtures.GENT)
+        wait_for_render(10)
+        ui_theme.ActionSheet.shown[-1].rows["Add to favourites"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertTrue(self.m.is_favourite(mc_fixtures.GENT))
+        self.assertEqual(tab._order, [mc_fixtures.GENT, mc_fixtures.BOB])
+        self.assertIsNotNone(getattr(tab.nodes._rows[mc_fixtures.GENT][0], "star", None))
+        self.assertTrue(click_label("Favourites"))
+        wait_for_render(10)
+        self.assertEqual(tab._order, [mc_fixtures.GENT])
+        tab.menu(mc_fixtures.GENT)
+        wait_for_render(10)
+        self.assertIn("Remove from favourites", ui_theme.ActionSheet.shown[-1].rows)
+
     def test_discovered_adds_with_plus_and_ticks_contacts(self):
         act = mc_fixtures.open_app(tab="Contacts")
         page = self._discovered(act)
