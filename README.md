@@ -56,7 +56,7 @@ filter type 0 on every row decode fastest; other PNGs work too.
 ```
 eu.axistem.micropymesh/    # the app payload — exactly what ships in the .mpk
   MANIFEST.JSON              # app manifest (launcher activity + boot_completed service)
-  icon_64x64.png
+  icon_64x64.png             # app icon (the 64 px from logo/)
   main_activity.py           # main screen: Chats / Contacts / Map / Radio / Settings tabs
   tab_chats.py, tab_nodes.py, tab_map.py, tab_radio.py, tab_settings.py, ui_tabs.py
   thread_activity.py         # channel and direct-message threads
@@ -81,6 +81,8 @@ eu.axistem.micropymesh/    # the app payload — exactly what ships in the .mpk
   ui_theme.py                # widgets, fonts, shared styles, action sheets
   ui_palette.py              # light and dark colours, accent
   fonts/                     # Archivo Narrow + Mesh Mono (subset of IBM Plex Mono), OFL
+logo/                        # the app logo: 8–256 px, transparent and on a tile (_tile), 8 px
+                             # radio-tower variant (_tower), Awtrix GIFs and the Piskel project
 tests/                       # desktop unit tests (CPython); fake_mpos.py stands in for the OS
 tests/graphical/             # screen tests on the MicroPythonOS desktop build (480x480)
 tools/check_app.py           # bundle checks (compiles, manifest, icon)
@@ -145,7 +147,9 @@ Adapts, or interoperates with, these MIT-licensed works (full notices in
 - **[meshcore-pi](https://github.com/brianwiddas/meshcore-pi)** © Brian Widdas: X25519 and identity
   crypto, used as the reference implementation.
 - **[MeshCore](https://github.com/ripplebiz/MeshCore)** © Scott Powell: the protocol and wire-format
-  reference, and the wordmark the app icon is derived from.
+  reference.
+- **[MicroPython](https://github.com/micropython/micropython)** © Damien P. George: the logo the app
+  icon is drawn after (a snake on a chip, here with a radio tower and mesh nodes).
 
 The text font is **[Archivo Narrow](https://github.com/Omnibus-Type/ArchivoNarrow)** © The
 Archivo Narrow Project Authors. The font for IDs and numbers is **Mesh Mono**, a subset of

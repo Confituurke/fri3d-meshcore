@@ -1,8 +1,8 @@
 # Third-party notices
 
-This app adapts and interoperates with the following third-party works. The three code and
-reference works are each used under the MIT License; their original copyright notices are
-reproduced below, followed by the MIT license text (identical for all three). The bundled
+This app adapts and interoperates with the following third-party works. The four code,
+reference and artwork works are each used under the MIT License; their original copyright
+notices are reproduced below, followed by the MIT license text (identical for all four). The bundled
 font is used under the SIL Open Font License 1.1.
 
 ## python-pure25519
@@ -29,12 +29,17 @@ Used as the protocol / wire-format reference (packet header, group-channel and d
 crypto, advert layout, and the PATH/ACK acknowledgement format). No source code is copied; the
 interoperable wire format is re-implemented in pure Python from the specification and source.
 
-**The app icon** (`eu.axistem.micropymesh/icon_64x64.png`) is derived from the official MeshCore
-wordmark, which ships in that MIT-licensed repository at `logo/meshcore.svg` and which the
-MeshCore FAQ (7.4) makes available for use. The letterforms are the original ones, sliced
-between the "H" and the "C" and stacked to fit a square icon; nothing was redrawn or
-re-typeset. MESHCORE is a trademark of its owner: this app is an independent, community-built
-client and is not affiliated with or endorsed by the MeshCore project.
+MESHCORE is a trademark of its owner: this app is an independent, community-built client and
+is not affiliated with or endorsed by the MeshCore project.
+
+## MicroPython
+Copyright (c) 2013-2026 Damien P. George
+https://github.com/micropython/micropython
+
+**The app icon** (`eu.axistem.micropymesh/icon_64x64.png`, and every size in `logo/`) is an
+original drawing after the MicroPython logo, which ships in that MIT-licensed repository under
+`logo/`: a red snake with a yellow belly coiled on a microcontroller chip. The drawing adds a
+radio tower and mesh nodes for MeshCore; no part of the MicroPython artwork is copied.
 
 ## Archivo Narrow
 Copyright 2019 The Archivo Narrow Project Authors
