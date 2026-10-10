@@ -1,5 +1,5 @@
-"""Settings sub-pages: the name, our contact as a QR, a new channel, the quick replies, our own
-position and the app's look."""
+"""Settings sub-pages: the name, our contact as a QR, a new channel, the quick replies, quiet
+hours, our own position and the app's look."""
 
 import lvgl as lv
 
@@ -526,6 +526,48 @@ class ShareChannelActivity(_QRActivity):
         return ("Share channel", name, self.mgr.channel_uri(name),
                 "Scan it in the MeshCore app to join this channel.",
                 "This channel has a 256-bit key, which a QR cannot carry.")
+
+
+class QuietHoursActivity(Activity):
+    """No sounds between two times of day, every day; messages still arrive."""
+
+    MINUTES = (0, 15, 30, 45)
+
+    def onCreate(self):
+        self.mgr = MeshCoreManager.get_instance()
+        q = self.mgr.quiet_hours()
+        scr = T.make_screen()
+        T.HeaderSub(scr, "Quiet hours", back=self.finish)
+        body = T.scroll_area(scr, 14, 10)
+        body.set_style_pad_ver(8, lv.PART.MAIN)
+        card = T.card(body, filled=False, pad_ver=0, gap=0)
+        row = T.row(card, lv.pct(100), 52, 8)
+        T.label(row, "Quiet hours", 16).set_flex_grow(1)
+        self.switch = T.switch(row, q["enabled"], self.set_enabled)
+        self.start_hour, self.start_min = self._time(body, "From", q["start"])
+        self.end_hour, self.end_min = self._time(body, "Until", q["end"])
+        T.label(body, "Every day between these times the app makes no sound. Messages still "
+                "arrive and show as unread.", 13, col=T.MUTED,
+                long_mode=lv.label.LONG_MODE.WRAP, width=lv.pct(100))
+        self.setContentView(scr)
+
+    def _time(self, body, title, minutes):
+        T.section_label(body, title)
+        row = T.row(body, lv.pct(100), lv.SIZE_CONTENT, 12)
+        mins = minutes % 60
+        hour = T.roller(row, ["%02d" % h for h in range(24)], minutes // 60, self._changed)
+        T.label(row, ":", 24, 600)
+        minute = T.roller(row, ["%02d" % m for m in self.MINUTES],
+                          self.MINUTES.index(mins) if mins in self.MINUTES else 0, self._changed)
+        return hour, minute
+
+    def set_enabled(self, on):
+        self.mgr.set_quiet_hours(enabled=on)
+
+    def _changed(self, _index=None):
+        self.mgr.set_quiet_hours(
+            start=self.start_hour.get_selected() * 60 + self.MINUTES[self.start_min.get_selected()],
+            end=self.end_hour.get_selected() * 60 + self.MINUTES[self.end_min.get_selected()])
 
 
 class MaxHopsActivity(_FormActivity):

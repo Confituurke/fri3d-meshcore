@@ -423,5 +423,12 @@ def test_auto_advert_text():
     _assert(t({"flood_h": 3, "zero_hop_min": 120}) == "3 h · nearby 2 h",
             t({"flood_h": 3, "zero_hop_min": 120}))
 
+def test_quiet_text():
+    t = _ui().quiet_text
+    _assert(t({"enabled": False, "start": 1320, "end": 420}) == "Off")
+    _assert(t({"enabled": True, "start": 1410, "end": 420}) == "23:30\u201307:00",
+            t({"enabled": True, "start": 1410, "end": 420}))
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

@@ -150,5 +150,51 @@ def test_per_channel_and_contact_override():
     _assert(m2.sound_override("Public") == "off", "overrides are kept")
 
 
+def test_quiet_hours_off_by_default_and_kept():
+    env, m, played = _setup()
+    _assert(m.quiet_hours() == {"enabled": False, "start": 22 * 60, "end": 7 * 60},
+            m.quiet_hours())
+    m.set_quiet_hours(enabled=True, start=23 * 60 + 30, end=6 * 60)
+    m.set_quiet_hours(start=24 * 60)                       # not a time of day: ignored
+    m2 = fake_mpos.new_manager(env)
+    _assert(m2.quiet_hours() == {"enabled": True, "start": 23 * 60 + 30, "end": 6 * 60},
+            m2.quiet_hours())
+
+
+def _at(m, hh, mm=0):
+    m._local_minute = lambda: hh * 60 + mm
+
+
+def test_quiet_hours_silence_every_sound():
+    env, m, played = _setup()
+    m.set_sound_settings(enabled=True, all=True)
+    m.set_quiet_hours(enabled=True, start=22 * 60, end=7 * 60)
+    m.set_sound_override("Public", "on")                   # even a channel set to always sound
+    for hh in (22, 23, 0, 6):
+        _at(m, hh, 59 if hh == 6 else 0)
+        env.now_ms += 5000
+        m._ingest(_group("Sam", "hi %d" % hh, 1790000000 + hh), rssi=-90, snr=4)
+    _assert(played == [], played)
+    _at(m, 7)
+    env.now_ms += 5000
+    m._ingest(_group("Sam", "morning", 1790000100), rssi=-90, snr=4)
+    _assert(played == ["channel"], played)
+
+
+def test_quiet_hours_within_one_day_and_unknown_clock():
+    env, m, played = _setup()
+    m.set_sound_settings(enabled=True, all=True)
+    m.set_quiet_hours(enabled=True, start=13 * 60, end=14 * 60)
+    _at(m, 13, 30)
+    _assert(m._quiet_now())
+    _at(m, 14)
+    _assert(not m._quiet_now())
+    m._local_minute = lambda: None                         # no clock yet: never quiet
+    _assert(not m._quiet_now())
+    m.set_quiet_hours(enabled=False)
+    _at(m, 13, 30)
+    _assert(not m._quiet_now())
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

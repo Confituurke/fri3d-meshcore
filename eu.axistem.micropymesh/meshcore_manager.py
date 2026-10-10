@@ -2478,13 +2478,72 @@ class MeshCoreManager:
             self._override_cache = ov
         return ov
 
+    def quiet_hours(self):
+        """{enabled, start, end}: no sounds from `start` to `end`, minutes after local midnight."""
+        out = {"enabled": False, "start": 22 * 60, "end": 7 * 60}
+        try:
+            from mpos import SharedPreferences
+            saved = SharedPreferences(NICKNAME_PREFS).get_dict("quiet_hours", {}) or {}
+            out["enabled"] = bool(saved.get("enabled", False))
+            for k in ("start", "end"):
+                v = saved.get(k)
+                if isinstance(v, int) and 0 <= v < 24 * 60:
+                    out[k] = v
+        except Exception:
+            pass
+        return out
+
+    def set_quiet_hours(self, enabled=None, start=None, end=None):
+        cur = self.quiet_hours()
+        if enabled is not None:
+            cur["enabled"] = bool(enabled)
+        for k, v in (("start", start), ("end", end)):
+            if isinstance(v, int) and 0 <= v < 24 * 60:
+                cur[k] = v
+        try:
+            ed = self._editor()
+            ed.put_dict("quiet_hours", cur)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: quiet hours error:", repr(e))
+        self._quiet_cache = cur
+        return cur
+
+    def _local_minute(self):
+        """Minutes after local midnight, None while the clock is not set."""
+        now = unix_time()
+        if now < CLOCK_VALID_AFTER:
+            return None
+        tz = 0
+        try:
+            import time
+            import mpos.time
+            from ui_model import tz_offset
+            tz = tz_offset(mpos.time.localtime(), time.gmtime())
+        except Exception:
+            pass
+        return ((now + tz) // 60) % (24 * 60)
+
+    def _quiet_now(self):
+        q = getattr(self, "_quiet_cache", None)
+        if q is None:
+            q = self._quiet_cache = self.quiet_hours()
+        if not q["enabled"] or q["start"] == q["end"]:
+            return False
+        m = self._local_minute()
+        if m is None:
+            return False
+        if q["start"] < q["end"]:
+            return q["start"] <= m < q["end"]
+        return m >= q["start"] or m < q["end"]
+
     def _chime(self, kind, key=None):
         """Beep for an incoming channel message, direct message or advert: a per-channel or
         per-contact override wins ("on" even with the buzzer off, "off" always), otherwise
         the settings decide (buzzer on, and All or this kind chosen). At most one beep per
-        TUNE_GAP_MS."""
+        TUNE_GAP_MS. Nothing at all during quiet hours."""
         mode = self._overrides().get(key) if key is not None else None
-        if mode == "off":
+        if mode == "off" or self._quiet_now():
             return
         if mode != "on":
             cfg = getattr(self, "_sound_cache", None)

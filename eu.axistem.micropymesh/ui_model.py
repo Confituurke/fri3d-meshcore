@@ -343,6 +343,15 @@ def auto_advert_text(cfg):
     return " \u00b7 ".join(parts) or "Off"
 
 
+def hhmm(minutes):
+    return "%02d:%02d" % (minutes // 60, minutes % 60)
+
+
+def quiet_text(q):
+    """The Settings value for quiet hours: "Off" or "22:00–07:00"."""
+    return "%s\u2013%s" % (hhmm(q["start"]), hhmm(q["end"])) if q["enabled"] else "Off"
+
+
 def preset_summary(p, power):
     """(title, detail, airtime) for the Radio tab's preset card."""
     title = p.get("name") or "Custom"

@@ -77,6 +77,24 @@ class TestSettingsMore(unittest.TestCase):
         wait_for_render(20)
         self.assertIsNotNone(self.m.get_channel("Ops"))
 
+    def test_quiet_hours(self):
+        self.m.set_sound_settings(enabled=True)
+        act = mc_fixtures.open_app(tab="Settings")
+        self.assertEqual(act._tab._quiet_row.value.get_text(), "Off")
+        tap(act._tab._quiet_row.obj)
+        page = top()
+        self.assertEqual(type(page).__name__, "QuietHoursActivity")
+        page.set_enabled(True)
+        page.start_hour.set_selected(23, False)
+        page.start_min.set_selected(2, False)             # :30
+        page.start_hour.send_event(lv.EVENT.VALUE_CHANGED, None)
+        wait_for_render(10)
+        self.assertEqual(self.m.quiet_hours(), {"enabled": True, "start": 23 * 60 + 30,
+                                                "end": 7 * 60})
+        page.finish()
+        wait_for_render(20)
+        self.assertEqual(act._tab._quiet_row.value.get_text(), "23:30\u201307:00")
+
 
 if __name__ == "__main__":
     unittest.main()

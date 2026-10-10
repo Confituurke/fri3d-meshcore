@@ -156,6 +156,9 @@ class SettingsTab(Tab):
             T.label(row, text, 16).set_flex_grow(1)
             self._sound[key] = T.switch(row, cfg[key], lambda v, k=key: self._set_kind(k, v))
         self._show_kinds(cfg)
+        self._quiet_row = T.SettingRow(self._sound_rows, "Quiet hours",
+                                       ui_model.quiet_text(self.mgr.quiet_hours()),
+                                       lambda: self._open(settings_pages.QuietHoursActivity))
         T.SettingRow(self._sound_rows, "Play a test sound", None, self.mgr.test_sound, chevron=False)
         if not self.mgr.has_buzzer():
             T.label(self._sound_rows, "This device has no buzzer the app can use.", 13, col=T.MUTED)
@@ -248,6 +251,7 @@ class SettingsTab(Tab):
         self._hash_row.value.set_text(self._hash_text())
         self._regions_row.value.set_text(self._regions_text())
         self._advert_row.value.set_text(self._advert_text())
+        self._quiet_row.value.set_text(ui_model.quiet_text(self.mgr.quiet_hours()))
         self._show_auto(self.mgr.auto_add_settings())
         self._location_row.value.set_text(self._location_text())
         self._look_row.value.set_text(settings_pages.appearance_text())

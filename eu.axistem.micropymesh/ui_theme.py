@@ -789,6 +789,24 @@ def dropdown(parent, options, selected=0):
     return dd
 
 
+def roller(parent, options, selected, on_change, width=96):
+    """A 3-row wheel to pick one of `options`; `on_change(index)` after a pick."""
+    r = lv.roller(parent)
+    r.set_options("\n".join(options), lv.roller.MODE.NORMAL)
+    r.set_visible_row_count(3)
+    r.set_width(width)
+    r.set_selected(selected, False)
+    r.set_style_text_font(font(20), lv.PART.MAIN)
+    r.set_style_text_color(color(MUTED), lv.PART.MAIN)
+    fill(r, SURFACE, 12, OUTLINE)
+    r.set_style_bg_color(color(ACCENT), lv.PART.SELECTED)
+    r.set_style_bg_opa(lv.OPA.COVER, lv.PART.SELECTED)
+    r.set_style_text_color(color(ON_ACCENT), lv.PART.SELECTED)
+    r.set_style_text_font(font(20, 600), lv.PART.SELECTED)
+    on(r, lv.EVENT.VALUE_CHANGED, lambda e: on_change(r.get_selected()))
+    return r
+
+
 def keyboard(scr, ta=None, on_show=None, on_hide=None, floating=False):
     """MicroPythonOS's keyboard in the canvas colours, hidden until its textarea is tapped.
     In a column screen it takes its place at the bottom; floating, it covers the bottom."""
