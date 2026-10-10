@@ -29,7 +29,7 @@ from meshcore_packet import (MeshCorePacket, make_header, encode_path_len,
                              ROUTE_TYPE_TRANSPORT_FLOOD, PH_ROUTE_MASK,
                              PAYLOAD_TYPE_ADVERT, PAYLOAD_TYPE_TXT_MSG, PAYLOAD_TYPE_PATH,
                              PAYLOAD_TYPE_ACK, PAYLOAD_TYPE_REQ, PAYLOAD_TYPE_RESPONSE,
-                             PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE)
+                             PAYLOAD_TYPE_ANON_REQ, PAYLOAD_TYPE_TRACE, PAYLOAD_TYPE_MULTIPART)
 from meshcore_channel import (decode_group_text, encode_group_text, PUBLIC_CHANNEL, Channel,
                              psk_from_text)
 from meshcore_advert import (parse_advert, build_advert_appdata, advert_signed_message,
@@ -172,6 +172,8 @@ MAX_OWN_HASHES = 32         # our recent channel packets, to recognise repeater 
 # see _attempt_reinit for why an unrecoverable radio must go quiet rather than keep resetting.
 # TX timing, as in the firmware (BaseChatMesh.cpp TXT_ACK_DELAY, Mesh.cpp reciprocal path).
 ACK_DELAY_MS = 200
+MULTI_ACK_GAP_MS = 300      # between the extra ACK copies and the ACK (Mesh.cpp)
+EXTRA_ACKS = (0, 1, 2)
 ACK_JITTER_MS = 100
 PATH_RETURN_DELAY_MS = 500
 
@@ -1490,6 +1492,8 @@ class MeshCoreManager:
             pass
         elif pkt.payload_type == PAYLOAD_TYPE_ACK and self._handle_ack(pkt):
             pass
+        elif pkt.payload_type == PAYLOAD_TYPE_MULTIPART and self._handle_multipart(pkt):
+            pass
         elif pkt.payload_type == PAYLOAD_TYPE_RESPONSE and self._handle_response(pkt):
             pass
         elif pkt.payload_type == PAYLOAD_TYPE_TRACE and self._handle_trace(pkt):
@@ -1806,12 +1810,24 @@ class MeshCoreManager:
         contact = self._contacts.get(got["pubkey"].hex())
         route, path_raw, path = self._route(contact)
         ack6 = bytes(got["ack_hash"]) + bytes([0, self._rand_byte()])
+        delay = ACK_DELAY_MS
+        if route == ROUTE_TYPE_DIRECT:
+            # Extra copies first, as MULTIPART packets counting down (Mesh::routeDirectRecvAcks)
+            extra = getattr(self, "_extra_acks_cache", None)
+            if extra is None:
+                extra = self._extra_acks_cache = self.extra_acks()
+            for remaining in range(extra, 0, -1):
+                multi = MeshCorePacket(make_header(route, PAYLOAD_TYPE_MULTIPART), path_raw, path,
+                                       bytes([(remaining << 4) | PAYLOAD_TYPE_ACK]) +
+                                       bytes(got["ack_hash"])[:4])
+                self._enqueue_tx(multi.to_bytes(), delay)
+                delay += MULTI_ACK_GAP_MS
         out = MeshCorePacket(make_header(route, PAYLOAD_TYPE_ACK), path_raw, path, ack6)
         try:
             self._remember(out.packet_hash())
         except Exception:
             pass
-        self._enqueue_tx(out.to_bytes(), ACK_DELAY_MS, ACK_JITTER_MS)
+        self._enqueue_tx(out.to_bytes(), delay, ACK_JITTER_MS)
 
     def _send_path_ack(self, got, pkt):
         """Reply to a received DM with a flood PATH-return embedding its ack hash."""
@@ -1975,6 +1991,36 @@ class MeshCoreManager:
         if self._sessions and self._keep_alive_acked(ack):
             return True
         return self._mark_delivered(ack, pkt.snr)
+
+    def _handle_multipart(self, pkt):
+        """One of a set of packets; only the extra copies of an ACK are used (Mesh.cpp)."""
+        p = bytes(pkt.payload)
+        if len(p) < 5 or p[0] & 0x0F != PAYLOAD_TYPE_ACK:
+            return False
+        ack = p[1:5]
+        if self._sessions and self._keep_alive_acked(ack):
+            return True
+        return self._mark_delivered(ack, pkt.snr)
+
+    def extra_acks(self):
+        """How many extra copies go before each direct ACK we send: 0, 1 or 2."""
+        try:
+            from mpos import SharedPreferences
+            n = SharedPreferences(NICKNAME_PREFS).get_int("extra_acks", 0)
+        except Exception:
+            n = 0
+        return n if n in EXTRA_ACKS else 0
+
+    def set_extra_acks(self, n):
+        if n not in EXTRA_ACKS:
+            return
+        try:
+            ed = self._editor()
+            ed.put_int("extra_acks", n)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: extra acks error:", repr(e))
+        self._extra_acks_cache = n
 
     def _note_echo(self, h):
         """We heard one of our own channel packets come back: a repeater re-flooded it. That

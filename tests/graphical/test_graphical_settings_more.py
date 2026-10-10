@@ -130,6 +130,16 @@ class TestSettingsMore(unittest.TestCase):
         wait_for_render(10)
         self.assertIn("Unblock", ui_theme.ActionSheet.shown[-1].rows)
 
+    def test_extra_delivery_acks(self):
+        import ui_theme
+        act = mc_fixtures.open_app(tab="Settings")
+        self.assertEqual(act._tab._acks_row.value.get_text(), "off")
+        tap(act._tab._acks_row.obj)
+        ui_theme.ActionSheet.shown[-1].rows["2 extra"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(self.m.extra_acks(), 2)
+        self.assertEqual(act._tab._acks_row.value.get_text(), "2 extra")
+
 
 if __name__ == "__main__":
     unittest.main()

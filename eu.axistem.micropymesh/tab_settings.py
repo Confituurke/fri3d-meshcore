@@ -75,6 +75,7 @@ class SettingsTab(Tab):
                      lambda: self._open(settings_pages.QuickRepliesActivity), first=True)
         self._blocked_row = T.SettingRow(card, "Blocked", self._blocked_text(),
                                          lambda: self._open(settings_pages.BlockedActivity))
+        self._acks_row = T.SettingRow(card, "Delivery acks", self._acks_text(), self.choose_acks)
 
         T.section_label(body, "Auto-add contacts")
         self._build_auto_add(body)
@@ -204,6 +205,24 @@ class SettingsTab(Tab):
     def _hash_text(self):
         n = self.mgr.path_hash_size()
         return "%d byte%s" % (n, "" if n == 1 else "s")
+
+    @staticmethod
+    def _acks_label(n):
+        return "%d extra" % n if n else "off"
+
+    def _acks_text(self):
+        return self._acks_label(self.mgr.extra_acks())
+
+    def choose_acks(self):
+        cur = self.mgr.extra_acks()
+        self.sheet = T.ActionSheet("Extra delivery acks", [
+            (self._acks_label(n), lambda n=n: self.set_acks(n), "checked" if n == cur else None)
+            for n in (0, 1, 2)],
+            "Extra copies of each ack you send, for senders on weak links")
+
+    def set_acks(self, n):
+        self.mgr.set_extra_acks(n)
+        self._acks_row.value.set_text(self._acks_text())
 
     def _blocked_text(self):
         n = len(self.mgr.blocked())
