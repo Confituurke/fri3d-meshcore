@@ -91,5 +91,19 @@ def test_a_former_contact_cannot_be_written_to():
     _assert(ok and m.get_contact(pk)["name"] == "Alex", (ok, err))
 
 
+def test_last_message_times():
+    env, m, pk = _setup()
+    m._add_dm(pk, {"ts": 1790000500, "sender": "me", "text": "yo", "incoming": False})
+    _assert(m.last_message_times() == {pk: 1790000500}, m.last_message_times())
+
+
+def test_contact_sort_is_kept():
+    env, m, pk = _setup()
+    _assert(m.contact_sort() == "heard")
+    m.set_contact_sort("nearest")
+    m.set_contact_sort("bogus")                  # not a sort: ignored
+    _assert(_restart(env).contact_sort() == "nearest")
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

@@ -238,13 +238,41 @@ def _age_color(seconds):
     return MUTED
 
 
-def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
+def distance_text(metres):
+    if metres < 1000:
+        return "%d m" % round(metres)
+    if metres < 10000:
+        return "%.1f km" % (metres / 1000)
+    return "%d km" % round(metres / 1000)
+
+
+def metres_between(lat1, lon1, lat2, lon2):
+    """Distance between two points (equirectangular: close enough within a mesh)."""
+    import math
+    x = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2))
+    y = math.radians(lat2 - lat1)
+    return 6371000 * math.sqrt(x * x + y * y)
+
+
+def _located(n):
+    return n.get("lat") is not None and n.get("lon") is not None
+
+
+SORTS = (("heard", "Last heard"), ("name", "Name"), ("nearest", "Nearest"),
+         ("message", "Last message"))
+
+
+def node_rows(nodes, now_ms, filt="all", contacts=(), query="", sort="heard", here=None,
+              last_msg=None):
     """Rows for the Nodes tab. filt: all, contacts (saved), chat, rptr, room, new (heard in
-    the last hour and not a contact); query matches the name or hex id, any case. `nodes`
-    come most recent first, as the manager lists them."""
+    the last hour and not a contact), located (has a position); query matches the name or
+    hex id, any case. `nodes` come most recent first, as the manager lists them. sort:
+    heard (that order), name, nearest (to `here`, (lat, lon); unplaced ones last) or
+    message (`last_msg` {pubkey: ts}, newest first). With `here` the meta line ends in the
+    distance."""
     rows = []
     q = (query or "").strip().lower()
-    for n in nodes:
+    for i, n in enumerate(nodes):
         kind = _KINDS.get(n.get("type"), "other")
         age_s = _ticks_age_s(now_ms, n.get("heard_ms", now_ms))
         if filt == "new":
@@ -252,6 +280,9 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
                 continue
         elif filt == "contacts":
             if n.get("pubkey") not in contacts:
+                continue
+        elif filt == "located":
+            if not _located(n):
                 continue
         elif filt != "all" and kind != filt:
             continue
@@ -264,11 +295,25 @@ def node_rows(nodes, now_ms, filt="all", contacts=(), query=""):
         heard = "heard_ms" in n
         if not heard:
             meta = "not heard yet"
+        dist = None
+        if here is not None and _located(n):
+            dist = metres_between(here[0], here[1], n["lat"], n["lon"])
+            meta += " \u00b7 " + distance_text(dist)
         rows.append({"pubkey": n.get("pubkey"), "hex": (n.get("id") or n.get("pubkey", "??")[:2]).upper(),
                      "kind": kind, "name": display(n.get("name")) or "?",
                      "age": age_text(age_s) if heard else "",
                      "age_color": _age_color(age_s), "meta": meta,
-                     "contact": n.get("pubkey") in contacts})
+                     "contact": n.get("pubkey") in contacts, "_i": i, "_d": dist})
+    # MicroPython's sort is not stable: the position in `nodes` breaks every tie
+    if sort == "name":
+        rows.sort(key=lambda r: (r["name"].lower(), r["_i"]))
+    elif sort == "nearest" and here is not None:
+        rows.sort(key=lambda r: (r["_d"] is None, r["_d"] or 0, r["_i"]))
+    elif sort == "message":
+        last = last_msg or {}
+        rows.sort(key=lambda r: (-last.get(r["pubkey"], -1), r["_i"]))
+    for r in rows:
+        del r["_i"], r["_d"]
     return rows
 
 

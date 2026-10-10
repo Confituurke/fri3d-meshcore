@@ -449,5 +449,40 @@ def test_clock_warning():
     _assert(ui.clock_warning({"state": "ok", "clock_skew_s": None}) is None)
     _assert(ui.clock_warning({"state": "failed", "clock_skew_s": 900}) is None)
 
+def _located_nodes():
+    now = 10 ** 6
+    return now, [
+        {"pubkey": "aa" * 32, "id": "aa", "type": 1, "name": "Zed", "heard_ms": now - 1000,
+         "lat": 50.859, "lon": 4.35},                       # ~1.0 km north
+        {"pubkey": "bb" * 32, "id": "bb", "type": 1, "name": "Amy", "heard_ms": now - 5000,
+         "lat": 50.94, "lon": 4.35},                        # ~10 km north
+        {"pubkey": "cc" * 32, "id": "cc", "type": 2, "name": "Bob", "heard_ms": now - 9000}]
+
+
+def test_node_rows_show_the_distance_from_our_position():
+    now, nodes = _located_nodes()
+    rows = _ui().node_rows(nodes, now, here=(50.85, 4.35))
+    _assert(rows[0]["meta"].endswith(" \u00b7 1.0 km"), rows[0]["meta"])
+    _assert(rows[1]["meta"].endswith(" \u00b7 10 km"), rows[1]["meta"])
+    _assert("km" not in rows[2]["meta"], rows[2]["meta"])
+    _assert("km" not in _ui().node_rows(nodes, now)[0]["meta"], "no own position: no distance")
+    _assert(_ui().distance_text(850) == "850 m" and _ui().distance_text(42400) == "42 km")
+
+
+def test_node_rows_sorting_and_the_location_filter():
+    ui = _ui()
+    now, nodes = _located_nodes()
+    names = lambda rows: [r["name"] for r in rows]
+    _assert(names(ui.node_rows(nodes, now)) == ["Zed", "Amy", "Bob"], "as heard")
+    _assert(names(ui.node_rows(nodes, now, sort="name")) == ["Amy", "Bob", "Zed"])
+    _assert(names(ui.node_rows(nodes, now, sort="nearest", here=(50.85, 4.35)))
+            == ["Zed", "Amy", "Bob"])
+    _assert(names(ui.node_rows(nodes, now, sort="nearest")) == ["Zed", "Amy", "Bob"],
+            "no own position: as heard")
+    _assert(names(ui.node_rows(nodes, now, sort="message",
+                               last_msg={"bb" * 32: 200, "cc" * 32: 100})) == ["Amy", "Bob", "Zed"])
+    _assert(names(ui.node_rows(nodes, now, filt="located")) == ["Zed", "Amy"])
+
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

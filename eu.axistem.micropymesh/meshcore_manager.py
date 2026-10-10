@@ -210,6 +210,7 @@ AUTO_ADVERT_FLOOD_H = (0, 3, 6, 12, 24)        # automatic flood advert: off or 
 AUTO_ADVERT_ZERO_HOP_MIN = (0, 15, 30, 60, 120)  # automatic zero-hop advert: off or every N min
 AUTO_ADD_DEFAULTS = {"enabled": False, "all": False, "chat": False, "rptr": False, "room": False,
                      "sensor": False, "max_hops": None}
+CONTACT_SORTS = ("heard", "name", "nearest", "message")
 MAX_HOPS = 64               # a flood path holds at most 64 hops
 CLOCK_SKEW_WARN_S = 300     # a server clock this far off ours breaks logins and ordering
 ROOM_KEEP_ALIVE_S = 128     # rooms zero the login's suggested interval; the value it last held
@@ -3045,6 +3046,29 @@ class MeshCoreManager:
         out.sort(key=lambda n: n.get("seq", -1) if n.get("pubkey") in self._nodes else -1,
                  reverse=True)
         return out
+
+    def last_message_times(self):
+        """{pubkey: timestamp of the latest direct message, either way}."""
+        return {pk: msgs[-1].get("ts", 0) for pk, msgs in self._dm_messages.items() if msgs}
+
+    def contact_sort(self):
+        """How the contact lists are sorted: heard, name, nearest or message."""
+        try:
+            from mpos import SharedPreferences
+            v = SharedPreferences(NICKNAME_PREFS).get_string("contact_sort", "heard")
+        except Exception:
+            v = "heard"
+        return v if v in CONTACT_SORTS else "heard"
+
+    def set_contact_sort(self, key):
+        if key not in CONTACT_SORTS:
+            return
+        try:
+            ed = self._editor()
+            ed.put_string("contact_sort", key)
+            self._commit(ed)
+        except Exception as e:
+            print("MeshCore: contact sort error:", repr(e))
 
     def discovered_count(self):
         """Nodes heard that are not contacts."""

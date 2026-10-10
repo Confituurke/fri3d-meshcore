@@ -13,7 +13,8 @@ import thread_activity
 from meshcore_manager import MeshCoreManager
 from ui_tabs import Tab
 
-FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"))
+FILTERS = (("all", "All"), ("chat", "Chat"), ("rptr", "Repeaters"), ("room", "Rooms"),
+           ("located", "With location"))
 KIND_TAGS = {"chat": "chat", "rptr": "rptr", "room": "room", "sensor": "sens"}
 
 
@@ -29,7 +30,8 @@ def open_node(activity, mgr, pubkey, kind):
 
 
 class _NodeList:
-    """A filterable list of node rows; `trailing(row, r)` may add a widget at the right."""
+    """A filterable, sortable list of node rows; `trailing(row, r)` may add a widget at the
+    right. The sort is shared by the lists and kept."""
 
     def __init__(self, parent, activity, mgr, filters, on_menu, on_change, trailing=None):
         self.activity = activity
@@ -46,6 +48,8 @@ class _NodeList:
         for key, text in filters:
             self._chips[key] = T.Chip(self.chips_bar, text, lambda k=key: self.set_filter(k),
                                       key == "all", 14, 12)
+        self.sort = mgr.contact_sort()
+        self.sort_chip = T.Chip(self.chips_bar, self._sort_text(), self.choose_sort, False, 14, 12)
         self.empty = T.label(parent, "", 16, col=T.MUTED, long_mode=lv.label.LONG_MODE.WRAP,
                              width=T.W - 32)
         self.empty.set_style_pad_all(16, lv.PART.MAIN)
@@ -56,6 +60,27 @@ class _NodeList:
         for k, chip in self._chips.items():
             chip.set_selected(k == key)
         self.on_change()
+
+    def _sort_text(self):
+        return "Sort: " + dict(ui_model.SORTS)[self.sort]
+
+    def choose_sort(self):
+        self.sheet = T.ActionSheet("Sort by", [
+            (text, lambda k=key: self.set_sort(k), "checked" if key == self.sort else None)
+            for key, text in ui_model.SORTS])
+
+    def set_sort(self, key):
+        self.sort = key
+        self.mgr.set_contact_sort(key)
+        self.sort_chip.set_text(self._sort_text())
+        self.on_change()
+
+    def rows(self, nodes, contacts):
+        """The view model for these nodes with this list's filter, search and sort."""
+        pos = self.mgr.position()
+        here = (pos["lat"], pos["lon"]) if pos else None
+        return ui_model.node_rows(nodes, self.mgr._now_ms(), self.filt, contacts, self.query,
+                                  self.sort, here, self.mgr.last_message_times())
 
     def show(self, model, empty_text):
         keep = set(r["pubkey"] for r in model)
@@ -184,8 +209,7 @@ class NodesTab(Tab):
     def refresh(self):
         contacts = self.mgr.get_contact_nodes()
         keys = set(c["pubkey"] for c in contacts)
-        model = ui_model.node_rows(contacts, self.mgr._now_ms(), self.nodes.filt, keys,
-                                   self.nodes.query)
+        model = self.nodes.rows(contacts, keys)
         n_all = len(contacts)
         self.nodes._chips["all"].set_text("All %d" % n_all if n_all else "All")
         n = self.mgr.discovered_count()
@@ -252,8 +276,7 @@ class DiscoveredActivity(Activity):
     def refresh(self):
         nodes = self.mgr.get_learned_companions()
         contacts = set(c["pubkey"] for c in self.mgr.get_contacts())
-        model = ui_model.node_rows(nodes, self.mgr._now_ms(), self.nodes.filt, contacts,
-                                   self.nodes.query)
+        model = self.nodes.rows(nodes, contacts)
         new = sum(1 for n in nodes if n.get("pubkey") not in contacts)
         self.header.subtitle.set_text("%d heard · %d not added" % (len(nodes), new))
         self.nodes.show(model, "No nodes heard yet. Send an advert to say hello."

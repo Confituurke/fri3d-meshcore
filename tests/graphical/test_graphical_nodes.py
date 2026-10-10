@@ -40,6 +40,29 @@ class TestNodes(unittest.TestCase):
         wait_for_render(10)
         self.assertEqual(act._tab._order, [mc_fixtures.GENT])
 
+    def test_sort_distance_and_the_location_filter(self):
+        import ui_theme
+        for pk in (mc_fixtures.GENT, mc_fixtures.BOB):
+            self.m.add_contact(pk)
+        self.m._nodes[mc_fixtures.BOB].update(lat=50.94, lon=4.35)
+        self.m._nodes[mc_fixtures.GENT].update(lat=50.859, lon=4.35)
+        self.m.set_position(50.85, 4.35)
+        act = mc_fixtures.open_app(tab="Contacts")
+        tab = act._tab
+        self.assertEqual(tab._order, [mc_fixtures.BOB, mc_fixtures.GENT])     # as heard
+        self.assertTrue(tab.nodes._rows[mc_fixtures.GENT][0].line2.get_text().endswith("1.0 km"))
+        tab.nodes.sort_chip.obj.send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        ui_theme.ActionSheet.shown[-1].rows["Nearest"].send_event(lv.EVENT.CLICKED, None)
+        wait_for_render(10)
+        self.assertEqual(tab._order, [mc_fixtures.GENT, mc_fixtures.BOB])
+        self.assertEqual(self.m.contact_sort(), "nearest")
+        self.assertIn("Nearest", tab.nodes.sort_chip.label.get_text())
+        self.m._nodes[mc_fixtures.BOB].update(lat=None, lon=None)
+        self.assertTrue(click_label("With location"))
+        wait_for_render(10)
+        self.assertEqual(tab._order, [mc_fixtures.GENT])
+
     def test_discovered_adds_with_plus_and_ticks_contacts(self):
         act = mc_fixtures.open_app(tab="Contacts")
         page = self._discovered(act)
