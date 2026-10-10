@@ -440,5 +440,14 @@ def test_login_line_while_logging_in_again():
             == "Logging in\u2026")
 
 
+def test_clock_warning():
+    ui = _ui()
+    s = {"state": "ok", "role": "guest", "clock_skew_s": 2 * 3600 + 300}
+    _assert(ui.clock_warning(s).startswith("Its clock is 2 h ahead of ours."), ui.clock_warning(s))
+    s["clock_skew_s"] = -600
+    _assert(ui.clock_warning(s).startswith("Its clock is 10 min behind"), ui.clock_warning(s))
+    _assert(ui.clock_warning({"state": "ok", "clock_skew_s": None}) is None)
+    _assert(ui.clock_warning({"state": "failed", "clock_skew_s": 900}) is None)
+
 if __name__ == "__main__":
     fake_mpos.run_all(globals())

@@ -68,6 +68,8 @@ class NodeDetailActivity(Activity):
         self.login_text.set_flex_grow(1)
         T.button(login, "Admin…", self.admin_login, "filled", 40, size=16)
         self.login_button = T.button(login, "Log in", self.login_or_refresh, "primary", 40, size=16)
+        self.clock_warn = T.label(body, "", 13, col=T.WARN, long_mode=lv.label.LONG_MODE.WRAP,
+                                  width=lv.pct(100))
 
         self.content = T.column(body, lv.pct(100), lv.SIZE_CONTENT, 8)
         self.footer = T.label(body, "", 13, col=T.MUTED)
@@ -176,6 +178,12 @@ class NodeDetailActivity(Activity):
         self.login_text.set_text(text)
         self.login_text.set_style_text_color(T.color(col), lv.PART.MAIN)
         self.login_button.get_child(0).set_text("Refresh" if s.get("state") == "ok" else "Log in")
+        warn = ui_model.clock_warning(s)
+        self.clock_warn.set_text(warn or "")
+        if warn:
+            self.clock_warn.remove_flag(lv.obj.FLAG.HIDDEN)
+        else:
+            self.clock_warn.add_flag(lv.obj.FLAG.HIDDEN)
         results = s.get("results", {})
         lines = []
         for kind in ("ping", "trace"):

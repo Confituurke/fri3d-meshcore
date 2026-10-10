@@ -486,6 +486,16 @@ def login_line(session):
     return ("Not logged in", MUTED)
 
 
+def clock_warning(session):
+    """A line under the login when the server's clock is far off ours, else None."""
+    skew = session.get("clock_skew_s") if session.get("state") == "ok" else None
+    if not skew:
+        return None
+    return ("Its clock is %s %s ours. Logins and the order of posts can go wrong until "
+            "one of the clocks is set right." % (age_text(abs(skew)),
+                                                 "ahead of" if skew > 0 else "behind"))
+
+
 def recent_rows(recent):
     """Rows for the Radio tab's "recently heard": (age, kind, RSSI, SNR, hops)."""
     out = []

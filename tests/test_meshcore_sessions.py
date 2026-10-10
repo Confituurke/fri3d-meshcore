@@ -174,6 +174,19 @@ def test_wrong_password_times_out():
     _assert(m.server_session(srv.hex)["state"] == "ok")
 
 
+def test_a_server_clock_far_off_ours_is_noted():
+    env, m, srv, events = _setup()
+    m.login(srv.hex)
+    (kind, pkt, pt), = [x for x in srv.take() if x[0] == "login"]
+    ts = struct.unpack("<I", pt[:4])[0]
+    srv.login_reply(struct.pack("<I", ts + 3600) + pt[4:], False, 0, flood_path=b"\x3a")
+    skew = m.server_session(srv.hex)["clock_skew_s"]
+    _assert(3500 < skew < 3700, skew)
+    m.login(srv.hex)
+    srv.answer_login()                    # within a few seconds: nothing to say
+    _assert(m.server_session(srv.hex)["clock_skew_s"] is None)
+
+
 def test_requests_need_a_login():
     env, m, srv, events = _setup()
     ok, err = m.request_server(srv.hex, "status")

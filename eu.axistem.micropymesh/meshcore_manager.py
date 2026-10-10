@@ -211,6 +211,7 @@ AUTO_ADVERT_ZERO_HOP_MIN = (0, 15, 30, 60, 120)  # automatic zero-hop advert: of
 AUTO_ADD_DEFAULTS = {"enabled": False, "all": False, "chat": False, "rptr": False, "room": False,
                      "sensor": False, "max_hops": None}
 MAX_HOPS = 64               # a flood path holds at most 64 hops
+CLOCK_SKEW_WARN_S = 300     # a server clock this far off ours breaks logins and ordering
 ROOM_KEEP_ALIVE_S = 128     # rooms zero the login's suggested interval; the value it last held
 RECENT_MAX = 20                 # packets kept for the Radio tab's "recently heard" list
 RX_RATE_WINDOW_MS = 10 * 60 * 1000
@@ -2815,6 +2816,9 @@ class MeshCoreManager:
             room = (self._contacts.get(pubkey_hex) or {}).get("type") == ADV_TYPE_ROOM
             s["ka_ms"] = (r["keep_alive_s"] or (ROOM_KEEP_ALIVE_S if room else 0)) * 1000
             self._server_active(pubkey_hex)
+            now = unix_time()
+            skew = r["server_ts"] - now if now >= CLOCK_VALID_AFTER else 0
+            s["clock_skew_s"] = skew if abs(skew) > CLOCK_SKEW_WARN_S else None
             if not pending["remember"]:
                 self._keep_password(pubkey_hex, None)
             elif pending["password"]:

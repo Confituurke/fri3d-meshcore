@@ -234,6 +234,13 @@ class TestServerDetail(unittest.TestCase):
         wait_for_render(5)
         self.assertEqual(rec.calls[0][1], (mc_fixtures.GENT, "status"))
 
+    def test_a_server_clock_far_off_shows_a_warning(self):
+        self._logged_in(status=STATUS)
+        self.m.server_session(mc_fixtures.GENT)["clock_skew_s"] = -3 * 3600
+        _open_detail(mc_fixtures.GENT)
+        self.assertIsNotNone(find_label_with_text(lv.screen_active(),
+                                                  "Its clock is 3 h behind ours"))
+
     def test_ping_and_its_result(self):
         rec = mc_fixtures.Recorder(self.m, "ping", result=(True, None))
         act = _open_detail(mc_fixtures.GENT)
