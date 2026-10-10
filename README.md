@@ -1,6 +1,6 @@
-# MicroPyMesh
+# MicroPy Mesh
 
-**MicroPyMesh** is a [MeshCore](https://meshcore.io/) LoRa messenger app for
+**MicroPy Mesh** is a [MeshCore](https://meshcore.io/) LoRa messenger app for
 [MicroPythonOS](https://micropythonos.com) devices with a built-in SX1262 radio. It is laid out
 for 480×480 touch screens and developed on the Seeed SenseCAP Indicator D1L (ESP32-S3). The
 app id is **`eu.axistem.micropymesh`**.

@@ -53,7 +53,7 @@ def test_manifest_identity():
         man = json.load(f)
     _assert(man["fullname"] == APP, man["fullname"])
     _assert(man["version"] == "0.1.0", man["version"])
-    _assert(man["name"] == "MicroPyMesh", man["name"])
+    _assert(man["name"] == "MicroPy Mesh", man["name"])
 
 
 def test_about_matches_manifest():

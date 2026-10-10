@@ -14,7 +14,7 @@ import setup_activity
 import thread_activity
 from ui_tabs import Tab
 
-APP_NAME = "MicroPyMesh"
+APP_NAME = "MicroPy Mesh"
 VERSION = "0.1.0"
 
 
